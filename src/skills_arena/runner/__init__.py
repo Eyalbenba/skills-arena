@@ -28,9 +28,13 @@ from .mock import MockAgent, ScriptedMockAgent
 
 # Import real agents with graceful fallback
 try:
-    from .claude_code import ClaudeCodeAgent, ClaudeCodeAgentWithTools
-except ImportError:
+    from .claude_code import ClaudeCodeAgent, ClaudeCodeAgentWithClient
+    ClaudeCodeAgentWithTools = ClaudeCodeAgentWithClient  # Alias for backwards compat
+except ImportError as e:
+    import logging
+    logging.getLogger(__name__).debug(f"Claude Code agent not available: {e}")
     ClaudeCodeAgent = None  # type: ignore
+    ClaudeCodeAgentWithClient = None  # type: ignore
     ClaudeCodeAgentWithTools = None  # type: ignore
 
 try:

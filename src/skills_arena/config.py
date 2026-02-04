@@ -54,6 +54,12 @@ class Config(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     include_adversarial: bool = True
 
+    # Scenario strategy for comparisons:
+    # - "balanced": Generate scenarios for all skills together (default)
+    # - "per_skill": Generate scenarios from each skill's description alone
+    #                (competitive analysis - detects if competitors steal scenarios)
+    scenario_strategy: str = Field(default="balanced")
+
     # Agent frameworks to test against
     # Options: "claude-code", "codex", "raw-claude", "raw-openai", "mock"
     agents: list[str] = Field(default_factory=lambda: ["claude-code"])

@@ -18,7 +18,7 @@ from ..exceptions import GeneratorError
 from ..models import Difficulty, Scenario, Skill, Task
 from .base import BaseGenerator
 
-# Prompt template for scenario generation
+# Prompt template for scenario generation (multi-skill balanced)
 GENERATION_PROMPT = '''You are generating test scenarios for evaluating AI agent skill selection.
 
 ## Task Description
@@ -61,6 +61,42 @@ Example:
     "tags": ["search", "news", "simple"],
     "is_adversarial": false,
     "reasoning": "Clear search request for current information"
+  }}
+]
+```
+
+Generate exactly {count} scenarios. Return ONLY the JSON array, no other text.'''
+
+# Prompt template for single-skill focused scenario generation
+SINGLE_SKILL_PROMPT = '''You are generating test scenarios for a specific AI agent skill.
+
+## Target Skill
+{skill_description}
+
+## Instructions
+Generate {count} diverse user prompts that would naturally require using this skill.
+These are scenarios where THIS SKILL is clearly the best choice.
+
+Requirements:
+1. Cover different user personas (developer, business user, casual user, expert)
+2. Include simple, moderate, and complex requests
+3. Vary the phrasing - don't always mention the skill by name
+4. Ensure realistic, natural-sounding prompts that real users would ask
+5. Focus on the skill's core strengths and use cases
+
+## Output Format
+Return a JSON array of scenarios. Each scenario must have:
+- "prompt": The user's message/request
+- "difficulty": One of "easy", "medium", "hard"
+- "tags": Array of relevant tags
+
+Example:
+```json
+[
+  {{
+    "prompt": "Find the latest news about electric vehicles",
+    "difficulty": "easy",
+    "tags": ["search", "news", "simple"]
   }}
 ]
 ```
@@ -153,6 +189,95 @@ class LLMGenerator(BaseGenerator):
                     desc += f"  - {param.name}: {param.description}{required}\n"
             descriptions.append(desc)
         return "\n".join(descriptions)
+
+    async def generate_for_skill(
+        self,
+        skill: Skill,
+        count: int = 10,
+    ) -> list[Scenario]:
+        """Generate scenarios specifically for one skill.
+
+        These are scenarios where THIS skill should clearly be selected.
+        Used for competitive analysis - can another skill steal these?
+
+        Args:
+            skill: The skill to generate scenarios for.
+            count: Number of scenarios to generate.
+
+        Returns:
+            List of Scenario objects, all expecting this skill.
+        """
+        # Format skill description
+        skill_desc = f"### {skill.name}\n"
+        skill_desc += f"Description: {skill.description}\n"
+        if skill.when_to_use:
+            skill_desc += "When to use:\n"
+            for use_case in skill.when_to_use[:5]:
+                skill_desc += f"  - {use_case}\n"
+
+        prompt = SINGLE_SKILL_PROMPT.format(
+            skill_description=skill_desc,
+            count=count,
+        )
+
+        # Call Claude
+        client = self._get_client()
+        try:
+            response = await client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                temperature=self.temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except anthropic.APIError as e:
+            raise GeneratorError(f"Anthropic API error: {e}") from e
+
+        # Extract text
+        response_text = ""
+        for block in response.content:
+            if block.type == "text":
+                response_text += block.text
+
+        # Parse JSON
+        text = response_text.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            start_idx = 1 if lines[0].strip().startswith("```") else 0
+            end_idx = len(lines)
+            for i in range(start_idx, len(lines)):
+                if lines[i].strip() == "```":
+                    end_idx = i
+                    break
+            text = "\n".join(lines[start_idx:end_idx])
+
+        try:
+            scenario_dicts = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise GeneratorError(f"Failed to parse JSON: {e}") from e
+
+        # Convert to Scenario objects (all expect this skill)
+        scenarios = []
+        for i, data in enumerate(scenario_dicts):
+            if not isinstance(data, dict) or "prompt" not in data:
+                continue
+
+            difficulty_str = data.get("difficulty", "medium").lower()
+            try:
+                difficulty = Difficulty(difficulty_str)
+            except ValueError:
+                difficulty = Difficulty.MEDIUM
+
+            scenario = Scenario(
+                id=f"skill-{skill.name}-{uuid.uuid4().hex[:8]}",
+                prompt=data["prompt"],
+                expected_skill=skill.name,  # Always this skill
+                difficulty=difficulty,
+                tags=data.get("tags", []) + [f"source:{skill.name}"],
+                is_adversarial=False,
+            )
+            scenarios.append(scenario)
+
+        return scenarios
 
     def _build_prompt(
         self,
