@@ -252,10 +252,11 @@ class ClaudeCodeAgent(BaseAgent):
         # Get skill names for matching
         skill_names = [s.name for s in available_skills]
 
-        # State to capture selection
+        # State to capture selection and reasoning
         selection_state = {
             "selected_skill": None,
             "tool_input": {},
+            "reasoning_text": [],  # Capture Claude's text output before selection
         }
 
         # Build a mapping from skill name variations to canonical names
@@ -388,6 +389,8 @@ class ClaudeCodeAgent(BaseAgent):
                     elif isinstance(message, AssistantMessage):
                         for block in message.content:
                             if isinstance(block, TextBlock):
+                                # Capture Claude's reasoning text
+                                selection_state["reasoning_text"].append(block.text)
                                 # Log text (truncated for readability)
                                 text_preview = block.text[:150].replace('\n', ' ')
                                 logger.debug(f"  └─ TextBlock: {text_preview}...")
@@ -442,10 +445,12 @@ class ClaudeCodeAgent(BaseAgent):
                 logger.warning(f"<<< NO SELECTION made for prompt: {prompt[:50]}...")
 
             selected = selection_state["selected_skill"] is not None
+            # Join all captured reasoning text
+            reasoning = "\n".join(selection_state["reasoning_text"]) if selection_state["reasoning_text"] else ""
             return SkillSelection(
                 skill=selection_state["selected_skill"],
                 confidence=1.0 if selected else 0.0,
-                reasoning=f"Selected: {selection_state['selected_skill']}" if selected else "No selection",
+                reasoning=reasoning,
                 raw_response=raw_response,
             )
 

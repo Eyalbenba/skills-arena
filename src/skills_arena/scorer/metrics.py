@@ -18,6 +18,7 @@ from ..models import (
     Grade,
     Matchup,
     RankedSkill,
+    ScenarioDetail,
     SelectionResult,
     Skill,
 )
@@ -197,6 +198,8 @@ class Scorer:
                 insights=[],
                 per_agent={},
                 scenarios_run=0,
+                scenario_details=[],
+                steals={},
             )
 
         skill_names = [s.name for s in skills]
@@ -220,15 +223,26 @@ class Scorer:
             for name in skill_names
         }
 
+        # Build scenario details and track steals
+        scenario_details: list[ScenarioDetail] = []
+        steals: dict[str, list[str]] = {name: [] for name in skill_names}
+
         # Group results by scenario to compare skills
         by_scenario: dict[str, list[SelectionResult]] = defaultdict(list)
         for result in results:
             by_scenario[result.scenario.id].append(result)
 
-        for _scenario_id, scenario_results in by_scenario.items():
+        for scenario_id, scenario_results in by_scenario.items():
             # Find the selected skill (if any)
             selected_skill = None
+            expected_skill = None
+            reasoning = ""
+
             for r in scenario_results:
+                expected_skill = r.scenario.expected_skill
+                # Get Claude's reasoning text from the selection
+                if r.selection.reasoning:
+                    reasoning = r.selection.reasoning
                 if r.selection.skill in skill_names:
                     selected_skill = r.selection.skill
                     break
@@ -238,6 +252,30 @@ class Scorer:
                 for other_skill in skill_names:
                     if other_skill != selected_skill:
                         head_to_head[selected_skill][other_skill] += 1
+
+            # Build scenario detail
+            prompt = scenario_results[0].scenario.prompt if scenario_results else ""
+            # Only mark as stolen if expected_skill was specified AND a different skill was selected
+            was_stolen = (
+                selected_skill is not None
+                and expected_skill is not None
+                and expected_skill != ""  # Blind scenarios can't be stolen
+                and selected_skill != expected_skill
+            )
+
+            detail = ScenarioDetail(
+                scenario_id=scenario_id,
+                prompt=prompt,
+                expected_skill=expected_skill or "",
+                selected_skill=selected_skill,
+                reasoning=reasoning,
+                was_stolen=was_stolen,
+            )
+            scenario_details.append(detail)
+
+            # Track steals (only for non-blind scenarios)
+            if was_stolen and expected_skill and expected_skill in steals:
+                steals[expected_skill].append(scenario_id)
 
         # Determine winner based on total selections
         if selection_counts:
@@ -270,6 +308,8 @@ class Scorer:
             insights=[],  # Insights are generated separately
             per_agent={},
             scenarios_run=total_scenarios,
+            scenario_details=scenario_details,
+            steals=steals,
         )
 
     @staticmethod

@@ -131,6 +131,54 @@ class Task(BaseModel):
         return cls(description=task_str)
 
 
+class CustomScenario(BaseModel):
+    """A user-defined test scenario for power users.
+
+    Use this to define your own test cases instead of relying on LLM generation.
+    This is useful for regression testing, edge cases, or real production prompts.
+
+    Attributes:
+        prompt: The user message/prompt to test.
+        expected_skill: Optional - which skill SHOULD be chosen. If provided,
+                       enables steal detection. If omitted, just records selection.
+        tags: Optional categorization tags.
+
+    Example:
+        ```python
+        scenarios = [
+            CustomScenario(prompt="Find the latest AI news"),
+            CustomScenario(
+                prompt="Scrape pricing from stripe.com",
+                expected_skill="Firecrawl CLI",
+                tags=["scraping", "pricing"],
+            ),
+        ]
+        results = arena.compare(skills, scenarios=scenarios)
+        ```
+    """
+
+    prompt: str
+    expected_skill: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class GenerateScenarios(BaseModel):
+    """Marker to generate LLM scenarios in a mixed scenario list.
+
+    Use this when you want to mix custom scenarios with generated ones.
+
+    Example:
+        ```python
+        scenarios = [
+            CustomScenario(prompt="My edge case"),
+            GenerateScenarios(count=5),  # Generate 5 more
+        ]
+        ```
+    """
+
+    count: int = Field(default=5, ge=1)
+
+
 class Scenario(BaseModel):
     """An auto-generated test prompt that should trigger skill selection.
 
@@ -141,6 +189,7 @@ class Scenario(BaseModel):
         difficulty: Difficulty level (easy, medium, hard).
         tags: Categorization tags.
         is_adversarial: Whether this is an adversarial/edge case scenario.
+        is_custom: Whether this scenario was user-provided (not generated).
     """
 
     id: str
@@ -149,6 +198,7 @@ class Scenario(BaseModel):
     difficulty: Difficulty = Difficulty.MEDIUM
     tags: list[str] = Field(default_factory=list)
     is_adversarial: bool = False
+    is_custom: bool = False
 
 
 class SkillSelection(BaseModel):
@@ -245,6 +295,26 @@ class EvaluationResult(BaseModel):
     scenarios_run: int = 0
 
 
+class ScenarioDetail(BaseModel):
+    """Detailed information about a single scenario run.
+
+    Attributes:
+        scenario_id: Unique identifier for the scenario.
+        prompt: The scenario prompt that was given to Claude.
+        expected_skill: Which skill the scenario was designed for.
+        selected_skill: Which skill Claude actually selected.
+        reasoning: Claude's text output before selection (its thinking).
+        was_stolen: True if a competitor won a scenario designed for another skill.
+    """
+
+    scenario_id: str
+    prompt: str
+    expected_skill: str
+    selected_skill: str | None = None
+    reasoning: str = ""
+    was_stolen: bool = False
+
+
 class ComparisonResult(BaseModel):
     """The outcome of comparing multiple skills.
 
@@ -255,6 +325,8 @@ class ComparisonResult(BaseModel):
         insights: List of comparative insights.
         per_agent: Breakdown by agent framework.
         scenarios_run: Total number of scenarios evaluated.
+        scenario_details: Detailed results for each scenario.
+        steals: Skills that were "stolen" (lost their own scenarios to competitor).
     """
 
     winner: str
@@ -263,6 +335,8 @@ class ComparisonResult(BaseModel):
     insights: list[Insight] = Field(default_factory=list)
     per_agent: dict[str, ComparisonResult] = Field(default_factory=dict)
     scenarios_run: int = 0
+    scenario_details: list[ScenarioDetail] = Field(default_factory=list)
+    steals: dict[str, list[str]] = Field(default_factory=dict)  # skill -> [stolen scenario_ids]
 
 
 class RankedSkill(BaseModel):
