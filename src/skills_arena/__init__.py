@@ -35,6 +35,7 @@ from .exceptions import (
     TimeoutError,
     UnsupportedAgentError,
 )
+from .scorer import ELO, RatingTracker, Scorer
 from .models import (
     AgentResult,
     BattleResult,
@@ -85,6 +86,10 @@ __all__ = [
     "Matchup",
     "Insight",
     "Progress",
+    # Scorer
+    "Scorer",
+    "ELO",
+    "RatingTracker",
     # Exceptions
     "SkillsArenaError",
     "SkillParseError",
