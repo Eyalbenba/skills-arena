@@ -946,7 +946,30 @@ testpaths = ["tests"]
 - [ ] Web UI (optional)
 - [ ] GitHub Action for CI
 - [ ] Documentation site
-- [ ] Public skill registry (future)
+
+### Phase 6: skills.sh Integration
+Integrate with the [skills.sh](https://skills.sh) public skill registry to enable:
+
+- [ ] **Browse skills** - Search and discover skills via `npx skills find [query]`
+- [ ] **Compare from registry** - Pull two skills and benchmark head-to-head
+- [ ] **Publish scores** - Contribute benchmark results back to registry
+- [ ] **Leaderboards** - Public skill rankings by task category
+
+```python
+# Future API concept
+from skills_arena import Arena
+
+arena = Arena()
+
+# Browse skills for a task
+skills = arena.browse("web search")  # Fetches from skills.sh registry
+
+# Compare top 2 from registry
+results = arena.compare(
+    skills=["vercel-labs/skills/tavily-search", "openai/skills/web-browse"],
+    task="web search",
+)
+```
 
 ---
 
