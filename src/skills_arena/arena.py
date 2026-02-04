@@ -12,6 +12,39 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+
+def _suppress_asyncio_shutdown_errors() -> None:
+    """Suppress asyncio shutdown errors from early async generator exit.
+
+    The Claude Agent SDK uses anyio cancel scopes internally. When we break
+    out of an async generator early (to save tokens after skill selection),
+    the cleanup can trigger "cancel scope" errors during asyncio.run() shutdown.
+    These are harmless but noisy - this suppresses them.
+    """
+    # Get the current event loop's exception handler
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        return  # No loop running
+
+    original_handler = loop.get_exception_handler()
+
+    def quiet_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        exception = context.get("exception")
+        msg = context.get("message", "")
+        # Suppress cancel scope errors from SDK cleanup
+        if exception and "cancel scope" in str(exception):
+            return
+        if "cancel scope" in msg:
+            return
+        # Call original handler for other exceptions
+        if original_handler:
+            original_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(quiet_handler)
+
 from .config import ArenaConfig, Config, ProgressCallback
 from .exceptions import NoSkillsError
 from .generator import LLMGenerator, MockGenerator
@@ -331,6 +364,9 @@ class Arena:
 
         See compare() for full documentation.
         """
+        # Suppress asyncio shutdown errors from SDK cleanup
+        _suppress_asyncio_shutdown_errors()
+
         if len(skills) < 2:
             raise NoSkillsError("compare (requires at least 2 skills)")
 
@@ -348,14 +384,36 @@ class Arena:
                 message=f"Parsed {len(parsed_skills)} skills",
             ))
 
-        # Generate scenarios for all skills
+        # Generate scenarios based on strategy
         generator = self._get_generator()
-        scenarios = await generator.generate(
-            task=parsed_task,
-            skills=parsed_skills,
-            count=self.config.scenarios,
-            include_adversarial=self.config.include_adversarial,
-        )
+
+        if self.config.scenario_strategy == "per_skill":
+            # Competitive analysis: generate scenarios from each skill's description alone
+            # This tests if competitors can "steal" scenarios designed for another skill
+            scenarios = []
+            scenarios_per_skill = max(1, self.config.scenarios // len(parsed_skills))
+
+            for skill in parsed_skills:
+                skill_scenarios = await generator.generate_for_skill(
+                    skill=skill,
+                    count=scenarios_per_skill,
+                )
+                scenarios.extend(skill_scenarios)
+
+                if on_progress:
+                    on_progress(Progress(
+                        stage="generation",
+                        percent=10 + (len(scenarios) / (scenarios_per_skill * len(parsed_skills))) * 20,
+                        message=f"Generated {len(scenarios)} scenarios ({skill.name})",
+                    ))
+        else:
+            # Balanced: generate scenarios for all skills together (default)
+            scenarios = await generator.generate(
+                task=parsed_task,
+                skills=parsed_skills,
+                count=self.config.scenarios,
+                include_adversarial=self.config.include_adversarial,
+            )
 
         if on_progress:
             on_progress(Progress(

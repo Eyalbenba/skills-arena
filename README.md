@@ -205,11 +205,12 @@ Insights:
 ## Roadmap
 
 - [x] Architecture design
-- [ ] Phase 1: Core SDK (`evaluate`, `compare`)
+- [x] Phase 1: Core SDK (`evaluate`, `compare`)
 - [ ] Phase 2: Multi-framework support
 - [ ] Phase 3: Battle royale & ELO rankings
 - [ ] Phase 4: AI insights engine
 - [ ] Phase 5: Web UI & ecosystem
+- [ ] Phase 6: [skills.sh](https://skills.sh) integration - Browse public skills registry and compare head-to-head
 
 ## Contributing
 

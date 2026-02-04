@@ -3,16 +3,21 @@
 This module implements the ClaudeCodeAgent which uses the official
 Claude Agent SDK to run prompts and determine skill selection.
 
-The Claude Agent SDK (formerly Claude Code SDK) provides access to the same
-agentic capabilities that power Claude Code, including built-in tools and
-skill/tool selection logic.
+The approach mimics real Claude Code behavior:
+1. Skills are written to .claude/skills/ in the working directory
+2. Claude Code discovers them naturally via setting_sources=["project"]
+3. A generic task is given (vanilla system prompt)
+4. Claude decides which skill to invoke
+5. We intercept the selection via PreToolUse hook (without executing)
+
+This tests REAL skill discovery - not injected content.
 
 Usage:
     ```python
     async with ClaudeCodeAgent() as agent:
         selection = await agent.select_skill(
-            prompt="Search the web for Python tutorials",
-            available_skills=[web_search_skill, code_search_skill],
+            prompt="Research AI news and summarize findings",
+            available_skills=[tavily_skill, firecrawl_skill],
         )
         print(f"Selected: {selection.skill}")
     ```
@@ -20,9 +25,11 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -43,10 +50,11 @@ try:
         AssistantMessage,
         ClaudeAgentOptions,
         ClaudeSDKClient,
+        HookMatcher,
         ResultMessage,
+        SystemMessage,
         TextBlock,
         ToolUseBlock,
-        UserMessage,
         query,
     )
 
@@ -58,61 +66,23 @@ except ImportError:
     )
 
 
-def _skill_to_tool_definition(skill: Skill) -> dict[str, Any]:
-    """Convert a Skill to a tool definition for Claude.
-
-    Args:
-        skill: The skill to convert.
-
-    Returns:
-        Tool definition dict with name, description, and input_schema.
-    """
-    properties = {}
-    required = []
-
-    for param in skill.parameters:
-        properties[param.name] = {
-            "type": param.type,
-            "description": param.description,
-        }
-        if param.required:
-            required.append(param.name)
-
-    # Ensure at least one property for valid schema
-    if not properties:
-        properties["query"] = {
-            "type": "string",
-            "description": "The input query or request for this skill",
-        }
-
-    return {
-        "name": skill.name,
-        "description": skill.description,
-        "input_schema": {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        },
-    }
-
-
 class ClaudeCodeAgent(BaseAgent):
     """Agent implementation using the Claude Agent SDK.
 
-    This agent uses the official Claude Agent SDK (formerly Claude Code SDK)
-    to test skill selection. It spawns a Claude session with skills defined
-    as tools, then observes which tool the agent would invoke.
+    This agent mimics real Claude Code behavior by:
+    1. Writing skills to .claude/skills/ in the working directory
+    2. Letting Claude Code discover them via setting_sources=["project"]
+    3. Using vanilla system prompt (no injected content)
+    4. Intercepting the selection via PreToolUse hook (without executing)
 
-    The key insight is that we're testing the agent's SELECTION behavior,
-    not actually executing the skills. We present skills as callable tools
-    and see which one Claude chooses to invoke.
+    This tests REAL skill discovery - exactly how users experience it.
 
     Example:
         ```python
         async with ClaudeCodeAgent() as agent:
             selection = await agent.select_skill(
-                prompt="Search the web for Python tutorials",
-                available_skills=[web_search_skill, code_search_skill],
+                prompt="Research AI news and summarize findings",
+                available_skills=[tavily_skill, firecrawl_skill],
             )
             print(f"Selected: {selection.skill}")
         ```
@@ -121,8 +91,8 @@ class ClaudeCodeAgent(BaseAgent):
     def __init__(
         self,
         model: str = "claude-sonnet-4-20250514",
-        max_turns: int = 3,
-        timeout_seconds: int = 30,
+        max_turns: int = 10,
+        timeout_seconds: int = 60,
         working_dir: str | Path | None = None,
         api_key: str | None = None,
     ):
@@ -130,7 +100,7 @@ class ClaudeCodeAgent(BaseAgent):
 
         Args:
             model: The Claude model to use (default: claude-sonnet-4).
-            max_turns: Maximum conversation turns (keep low for selection).
+            max_turns: Maximum turns before selecting (allows thinking time).
             timeout_seconds: Request timeout.
             working_dir: Working directory for Claude (defaults to temp dir).
             api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var).
@@ -154,58 +124,93 @@ class ClaudeCodeAgent(BaseAgent):
             self._temp_dir = None
             self.working_dir = Path(working_dir)
 
-        # Client will be initialized on first use
-        self._client: ClaudeSDKClient | None = None
-        self._session_active: bool = False
+        # Track installed skills for cleanup
+        self._installed_skills_dir: Path | None = None
 
     @property
     def name(self) -> str:
         """Return the agent's name."""
         return "claude-code"
 
-    async def _start_session(
-        self,
-        system_prompt: str,
-        allowed_tools: list[str],
-    ) -> ClaudeSDKClient:
-        """Start a Claude SDK session with the given configuration.
+    def _install_skills_to_filesystem(self, skills: list[Skill]) -> None:
+        """Write skills to .claude/skills/ for Claude Code to discover.
+
+        This creates the actual skill file structure that Claude Code
+        expects, allowing natural skill discovery.
 
         Args:
-            system_prompt: The system prompt to use.
-            allowed_tools: List of allowed tool names.
+            skills: Skills to install.
+        """
+        skills_dir = self.working_dir / ".claude" / "skills"
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        self._installed_skills_dir = skills_dir
+
+        for skill in skills:
+            # Create skill directory using sanitized skill name
+            skill_slug = skill.name.lower().replace(" ", "-").replace("_", "-")
+            skill_dir = skills_dir / skill_slug
+            skill_dir.mkdir(exist_ok=True)
+
+            # Build SKILL.md content with frontmatter
+            skill_content = self._build_skill_file_content(skill)
+
+            # Write SKILL.md
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text(skill_content)
+            logger.debug(f"Installed skill: {skill.name} -> {skill_file}")
+
+    def _build_skill_file_content(self, skill: Skill) -> str:
+        """Build the SKILL.md file content for a skill.
+
+        Args:
+            skill: The skill to convert.
 
         Returns:
-            Connected ClaudeSDKClient.
-
-        Raises:
-            APIKeyError: If no API key is available.
-            AgentError: If session fails to start.
+            SKILL.md content with frontmatter.
         """
-        if not self._api_key:
-            raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY")
+        # Build frontmatter
+        frontmatter_lines = [
+            "---",
+            f"name: {skill.name}",
+        ]
 
-        try:
-            options = ClaudeAgentOptions(
-                system_prompt=system_prompt,
-                max_turns=self.max_turns,
-                cwd=str(self.working_dir),
-                allowed_tools=allowed_tools,
-            )
+        # Add description (handle multiline)
+        if skill.description:
+            if "\n" in skill.description:
+                frontmatter_lines.append("description: |")
+                for line in skill.description.split("\n")[:10]:  # Limit to 10 lines in frontmatter
+                    frontmatter_lines.append(f"  {line}")
+            else:
+                frontmatter_lines.append(f"description: {skill.description[:200]}")
 
-            self._client = ClaudeSDKClient(options=options)
-            await self._client.connect()
-            self._session_active = True
+        frontmatter_lines.append("---")
 
-            logger.debug(f"Claude SDK session started (max_turns={self.max_turns})")
-            return self._client
+        # Build body content
+        body_lines = [
+            "",
+            f"# {skill.name}",
+            "",
+        ]
 
-        except Exception as e:
-            logger.error(f"Failed to start Claude SDK session: {e}")
-            self._session_active = False
-            raise AgentError(
-                message=f"Failed to start session: {e}",
-                agent_name=self.name,
-            ) from e
+        # Add full description in body
+        if skill.description:
+            body_lines.append(skill.description)
+            body_lines.append("")
+
+        # Add when to use section
+        if skill.when_to_use:
+            body_lines.append("## When to Use")
+            body_lines.append("")
+            for example in skill.when_to_use:
+                body_lines.append(f"- {example}")
+            body_lines.append("")
+
+        # NOTE: We intentionally do NOT include raw_content here.
+        # Claude Code discovers skills and only shows a brief summary in
+        # the system-reminder. The full skill content is only loaded when
+        # the skill is actually invoked. This tests real discovery behavior.
+
+        return "\n".join(frontmatter_lines) + "\n".join(body_lines)
 
     async def select_skill(
         self,
@@ -215,12 +220,15 @@ class ClaudeCodeAgent(BaseAgent):
         """Run a prompt through Claude Code and determine skill selection.
 
         This method:
-        1. Converts skills to tool definitions
-        2. Creates a system prompt that asks Claude to select a tool
-        3. Runs the query and observes which tool is called
+        1. Installs skills to .claude/skills/ in the working directory
+        2. Configures Claude Code with setting_sources=["project"] for isolation
+        3. Uses vanilla system prompt (no injected skill content)
+        4. Intercepts skill selection via PreToolUse hook
+
+        This tests REAL skill discovery behavior.
 
         Args:
-            prompt: The user prompt to process.
+            prompt: The user prompt (task) to process.
             available_skills: Skills available for selection.
 
         Returns:
@@ -238,73 +246,206 @@ class ClaudeCodeAgent(BaseAgent):
 
         start_time = time.time()
 
+        # Install skills to filesystem for Claude Code to discover
+        self._install_skills_to_filesystem(available_skills)
+
         # Get skill names for matching
         skill_names = [s.name for s in available_skills]
 
-        # Build the system prompt for skill selection
-        system_prompt = self._build_selection_system_prompt(available_skills)
+        # State to capture selection
+        selection_state = {
+            "selected_skill": None,
+            "tool_input": {},
+        }
 
-        # Build allowed tools list - our skill tools plus minimal built-ins
-        allowed_tools = [s.name for s in available_skills]
+        # Build a mapping from skill name variations to canonical names
+        # This helps match "firecrawl" -> "Firecrawl CLI", etc.
+        skill_name_map: dict[str, str] = {}
+        for skill in available_skills:
+            # Map exact name
+            skill_name_map[skill.name.lower()] = skill.name
+            # Map simplified versions (remove "skill", "cli", etc.)
+            simplified = skill.name.lower().replace(" skill", "").replace(" cli", "").strip()
+            skill_name_map[simplified] = skill.name
+            # Map the slug version (how it appears in filesystem)
+            slug = skill.name.lower().replace(" ", "-").replace("_", "-")
+            skill_name_map[slug] = skill.name
+
+        # Build PreToolUse hook to intercept skill selection
+        async def capture_skill_selection(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,
+            context: Any,
+        ) -> dict[str, Any]:
+            """Hook to capture when Claude selects one of our test skills."""
+            tool_name = input_data.get("tool_name", "")
+            tool_input = input_data.get("tool_input", {})
+
+            logger.debug(f"[HOOK] PreToolUse fired: tool={tool_name}, input_keys={list(tool_input.keys())}")
+
+            selected_skill_name: str | None = None
+
+            # Check if Claude is using the native Skill tool
+            if tool_name == "Skill":
+                # Parse the skill being invoked from the input
+                invoked_skill = tool_input.get("skill", "").lower()
+                logger.info(f"[HOOK] Skill tool invoked with: {invoked_skill}")
+
+                # Match against our test skills
+                if invoked_skill in skill_name_map:
+                    selected_skill_name = skill_name_map[invoked_skill]
+
+            # Also check direct tool calls matching our skills
+            elif tool_name in skill_names:
+                selected_skill_name = tool_name
+            elif tool_name.lower() in skill_name_map:
+                selected_skill_name = skill_name_map[tool_name.lower()]
+
+            # If we found a match, record it
+            if selected_skill_name:
+                selection_state["selected_skill"] = selected_skill_name
+                selection_state["tool_input"] = tool_input
+                logger.info(f"★ Skill selection captured: {selected_skill_name}")
+
+                # Block execution - we only wanted to see the choice
+                return {
+                    "decision": "block",
+                    "reason": f"Selection recorded: {selected_skill_name}",
+                }
+
+            # Allow built-in tools (Read, Glob, Bash, etc.) to run normally
+            return {}
 
         try:
-            # Use the functional query API for simplicity and stateless operation
+            # Configure with vanilla settings - no custom system prompt
+            # Skills are discovered from .claude/skills/ via setting_sources
             options = ClaudeAgentOptions(
-                system_prompt=system_prompt,
                 max_turns=self.max_turns,
                 cwd=str(self.working_dir),
-                allowed_tools=allowed_tools,
+                model=self.model,
+                permission_mode="acceptEdits",  # Don't prompt for permissions
+                setting_sources=["project"],  # Only load project skills (isolation!)
+                hooks={
+                    "PreToolUse": [
+                        # Intercept Skill tool calls
+                        HookMatcher(
+                            matcher="Skill",
+                            hooks=[capture_skill_selection],
+                        ),
+                    ],
+                },
             )
 
-            selected_skill: str | None = None
-            confidence: float = 0.0
-            reasoning: str = ""
             raw_response: list[Any] = []
-            tool_inputs: dict[str, Any] = {}
 
-            # Query Claude and look for skill selection
-            async for message in query(prompt=prompt, options=options):
-                raw_response.append(message)
+            # Log the prompt being sent
+            logger.info(f">>> PROMPT: {prompt}")
+            logger.debug(f"Available skills: {skill_names}")
 
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, ToolUseBlock):
-                            # Check if the tool call matches one of our skills
-                            if block.name in skill_names:
-                                selected_skill = block.name
-                                confidence = 0.95  # High confidence for explicit tool call
-                                tool_inputs = block.input if hasattr(block, "input") else {}
-                                reasoning = (
-                                    f"Claude explicitly called {block.name} "
-                                    f"with inputs: {json.dumps(tool_inputs)}"
-                                )
-                                logger.info(f"Tool call detected: {block.name}")
+            # Suppress asyncio errors from breaking out of async generator early
+            # This happens because we break the loop when skill is selected
+            loop = asyncio.get_event_loop()
+            original_handler = loop.get_exception_handler()
 
-                        elif isinstance(block, TextBlock):
-                            # Check for skill mentions in text (lower confidence)
-                            text = block.text.lower()
-                            for skill_name in skill_names:
-                                if skill_name.lower() in text:
-                                    if selected_skill is None:
-                                        selected_skill = skill_name
-                                        confidence = 0.6  # Lower confidence for text mention
-                                        reasoning = f"Claude mentioned {skill_name} in response"
+            def suppress_cancel_scope_errors(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+                """Suppress cancel scope errors from early generator exit."""
+                exception = context.get("exception")
+                if exception and "cancel scope" in str(exception):
+                    return  # Suppress this specific error
+                # Call original handler for other exceptions
+                if original_handler:
+                    original_handler(loop, context)
+                else:
+                    loop.default_exception_handler(context)
 
-                elif isinstance(message, ResultMessage):
-                    if message.is_error:
-                        logger.warning(f"Claude returned error: {message.result}")
-                        # If error, reduce confidence
-                        if confidence > 0:
-                            confidence *= 0.5
-                            reasoning += " (with errors)"
+            loop.set_exception_handler(suppress_cancel_scope_errors)
+
+            # Query Claude and let it naturally decide
+            message_count = 0
+            try:
+                async for message in query(prompt=prompt, options=options):
+                    message_count += 1
+                    message_type = type(message).__name__
+                    raw_response.append(message)
+
+                    # Log each message type
+                    logger.debug(f"[Message {message_count}] Type: {message_type}")
+
+                    # Log SystemMessage content (shows skill discovery)
+                    if isinstance(message, SystemMessage):
+                        logger.info(f"  └─ SystemMessage subtype: {message.subtype}")
+                        # Log the full data for debugging
+                        if message.data:
+                            data_str = json.dumps(message.data, indent=2, default=str)
+                            # Log full content at DEBUG, summary at INFO
+                            if len(data_str) > 500:
+                                logger.info(f"  └─ SystemMessage data (truncated): {data_str[:500]}...")
+                                logger.debug(f"  └─ SystemMessage data (full):\n{data_str}")
+                            else:
+                                logger.info(f"  └─ SystemMessage data: {data_str}")
+
+                    # Parse AssistantMessage content blocks
+                    elif isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, TextBlock):
+                                # Log text (truncated for readability)
+                                text_preview = block.text[:150].replace('\n', ' ')
+                                logger.debug(f"  └─ TextBlock: {text_preview}...")
+
+
+                            elif isinstance(block, ToolUseBlock):
+                                # Log tool call details
+                                tool_input = block.input if hasattr(block, "input") else {}
+                                tool_input_str = json.dumps(tool_input)[:100] if tool_input else "{}"
+                                logger.info(f"  └─ ToolUseBlock: {block.name}")
+                                logger.debug(f"      Input: {tool_input_str}")
+
+                                # Check if Claude is using the native Skill tool
+                                if block.name == "Skill" and selection_state["selected_skill"] is None:
+                                    invoked_skill = tool_input.get("skill", "").lower()
+                                    logger.info(f"  └─ Skill tool invoking: '{invoked_skill}'")
+
+                                    # Match against our test skills
+                                    if invoked_skill in skill_name_map:
+                                        matched_skill = skill_name_map[invoked_skill]
+                                        selection_state["selected_skill"] = matched_skill
+                                        selection_state["tool_input"] = tool_input
+                                        logger.info(f"  └─ ★ SKILL SELECTED: {matched_skill}")
+
+                                # Also check direct tool calls matching our skills
+                                elif block.name in skill_names and selection_state["selected_skill"] is None:
+                                    selection_state["selected_skill"] = block.name
+                                    selection_state["tool_input"] = tool_input
+                                    logger.info(f"  └─ ★ SKILL SELECTED: {block.name}")
+
+                    elif isinstance(message, ResultMessage):
+                        logger.debug(f"  └─ ResultMessage: turns={message.num_turns}, error={message.is_error}")
+
+                    # Stop once we have a selection - don't waste more tokens
+                    if selection_state["selected_skill"]:
+                        if not selection_state.get("_logged"):
+                            logger.info(f"<<< SELECTED: {selection_state['selected_skill']}")
+                            selection_state["_logged"] = True
+                        break
+            except (asyncio.CancelledError, RuntimeError):
+                # Ignore errors during cleanup when breaking out of async generator
+                pass
+            finally:
+                # Restore original exception handler
+                loop.set_exception_handler(original_handler)
 
             latency_ms = (time.time() - start_time) * 1000
             logger.debug(f"Skill selection completed in {latency_ms:.1f}ms")
 
+            # Log final result
+            if not selection_state["selected_skill"]:
+                logger.warning(f"<<< NO SELECTION made for prompt: {prompt[:50]}...")
+
+            selected = selection_state["selected_skill"] is not None
             return SkillSelection(
-                skill=selected_skill,
-                confidence=confidence,
-                reasoning=reasoning or "No clear skill selection detected",
+                skill=selection_state["selected_skill"],
+                confidence=1.0 if selected else 0.0,
+                reasoning=f"Selected: {selection_state['selected_skill']}" if selected else "No selection",
                 raw_response=raw_response,
             )
 
@@ -315,55 +456,18 @@ class ClaudeCodeAgent(BaseAgent):
                 agent_name=self.name,
             ) from e
 
-    def _build_selection_system_prompt(self, skills: list[Skill]) -> str:
-        """Build a system prompt that frames the task as tool selection.
-
-        Args:
-            skills: Available skills to choose from.
-
-        Returns:
-            System prompt string.
-        """
-        skill_descriptions = []
-        for skill in skills:
-            desc = f"- **{skill.name}**: {skill.description}"
-            if skill.when_to_use:
-                desc += f"\n  Use when: {', '.join(skill.when_to_use[:3])}"
-            skill_descriptions.append(desc)
-
-        return f"""You are an AI assistant with access to specialized skills/tools.
-Your task is to analyze the user's request and determine which skill would be most appropriate.
-
-## Available Skills
-
-{chr(10).join(skill_descriptions)}
-
-## Instructions
-
-1. Read the user's request carefully
-2. Determine which skill best matches the request based on its description and use cases
-3. If a skill matches, call it with appropriate parameters
-4. If no skill is clearly relevant, respond normally without calling any skill
-
-Think about which skill's description best matches what the user is asking for.
-Only call a skill if it's clearly relevant to the request.
-When calling a skill, provide relevant parameters based on the user's request."""
-
     async def close(self) -> None:
         """Clean up resources."""
-        if self._client is not None and self._session_active:
+        # Clean up installed skills
+        if self._installed_skills_dir is not None:
             try:
-                await self._client.disconnect()
-                logger.debug("Claude SDK session closed")
+                shutil.rmtree(self._installed_skills_dir, ignore_errors=True)
             except Exception as e:
-                logger.warning(f"Error disconnecting client: {e}")
-            self._client = None
-            self._session_active = False
+                logger.warning(f"Error cleaning up skills dir: {e}")
+            self._installed_skills_dir = None
 
         # Clean up temp directory if we created one
         if self._temp_dir is not None:
-            import shutil
-
             try:
                 shutil.rmtree(self._temp_dir, ignore_errors=True)
             except Exception as e:
@@ -371,41 +475,39 @@ When calling a skill, provide relevant parameters based on the user's request.""
             self._temp_dir = None
 
 
-class ClaudeCodeAgentWithTools(ClaudeCodeAgent):
-    """Extended Claude Code agent that uses persistent sessions.
+class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
+    """Extended Claude Code agent that uses ClaudeSDKClient for persistent sessions.
 
-    This variant maintains a persistent ClaudeSDKClient session across
-    multiple skill selection calls, which can improve performance when
-    running many evaluations. The session is reused until close() is called.
+    This variant maintains a ClaudeSDKClient for multi-turn conversations,
+    useful when you need Claude to build context across multiple exchanges
+    before making a skill selection.
 
     Example:
         ```python
-        async with ClaudeCodeAgentWithTools() as agent:
-            # All selections reuse the same session
-            for scenario in scenarios:
-                selection = await agent.select_skill(
-                    prompt=scenario.prompt,
-                    available_skills=skills,
-                )
+        async with ClaudeCodeAgentWithClient() as agent:
+            selection = await agent.select_skill(
+                prompt="I need to research competitors and summarize findings",
+                available_skills=skills,
+            )
         ```
     """
 
     def __init__(
         self,
         model: str = "claude-sonnet-4-20250514",
-        max_turns: int = 5,  # Higher default for persistent sessions
+        max_turns: int = 10,
         timeout_seconds: int = 60,
         working_dir: str | Path | None = None,
         api_key: str | None = None,
     ):
-        """Initialize the Claude Code agent with persistent sessions.
+        """Initialize the Claude Code agent with client support.
 
         Args:
-            model: The Claude model to use (default: claude-sonnet-4).
-            max_turns: Maximum conversation turns per query.
+            model: The Claude model to use.
+            max_turns: Maximum conversation turns.
             timeout_seconds: Request timeout.
-            working_dir: Working directory for Claude (defaults to temp dir).
-            api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var).
+            working_dir: Working directory for Claude.
+            api_key: Anthropic API key.
         """
         super().__init__(
             model=model,
@@ -414,23 +516,23 @@ class ClaudeCodeAgentWithTools(ClaudeCodeAgent):
             working_dir=working_dir,
             api_key=api_key,
         )
-        self._cached_system_prompt: str | None = None
-        self._cached_skill_names: list[str] = []
+        self._client: ClaudeSDKClient | None = None
 
     @property
     def name(self) -> str:
         """Return the agent's name."""
-        return "claude-code-persistent"
+        return "claude-code-client"
 
     async def select_skill(
         self,
         prompt: str,
         available_skills: list[Skill],
     ) -> SkillSelection:
-        """Run skill selection with persistent session management.
+        """Run skill selection using ClaudeSDKClient for persistent context.
 
-        This method uses a persistent session when skills remain the same
-        across calls, resetting the session only when skills change.
+        Uses ClaudeSDKClient which maintains conversation context,
+        allowing multi-turn interactions before skill selection.
+        Skills are discovered from .claude/skills/ (filesystem-based).
 
         Args:
             prompt: The user prompt to process.
@@ -451,82 +553,98 @@ class ClaudeCodeAgentWithTools(ClaudeCodeAgent):
 
         start_time = time.time()
 
-        # Get skill names for matching
-        skill_names = [s.name for s in available_skills]
+        # Install skills to filesystem for Claude Code to discover
+        self._install_skills_to_filesystem(available_skills)
 
-        # Check if we need to rebuild the session (skills changed)
-        if skill_names != self._cached_skill_names:
-            if self._session_active:
-                await self.close()
-            self._cached_system_prompt = self._build_selection_system_prompt(available_skills)
-            self._cached_skill_names = skill_names.copy()
+        # Build skill name mapping (same as parent class)
+        skill_name_map: dict[str, str] = {}
+        for skill in available_skills:
+            skill_name_map[skill.name.lower()] = skill.name
+            simplified = skill.name.lower().replace(" skill", "").replace(" cli", "").strip()
+            skill_name_map[simplified] = skill.name
+            slug = skill.name.lower().replace(" ", "-").replace("_", "-")
+            skill_name_map[slug] = skill.name
 
-        # Ensure session is active
-        if not self._session_active:
-            await self._start_session(
-                system_prompt=self._cached_system_prompt or "",
-                allowed_tools=skill_names,
-            )
+        selection_state = {
+            "selected_skill": None,
+            "tool_input": {},
+        }
+
+        async def capture_skill_selection(
+            input_data: dict[str, Any],
+            tool_use_id: str | None,  # noqa: ARG001
+            context: Any,  # noqa: ARG001
+        ) -> dict[str, Any]:
+            tool_name = input_data.get("tool_name", "")
+            tool_input = input_data.get("tool_input", {})
+
+            if tool_name == "Skill":
+                invoked_skill = tool_input.get("skill", "").lower()
+                if invoked_skill in skill_name_map:
+                    selection_state["selected_skill"] = skill_name_map[invoked_skill]
+                    selection_state["tool_input"] = tool_input
+                    return {"decision": "block", "reason": f"Selection: {skill_name_map[invoked_skill]}"}
+            return {}
 
         try:
-            # Send query to existing session
-            await self._client.query(prompt)
+            # Configure with vanilla settings - no custom system prompt
+            options = ClaudeAgentOptions(
+                max_turns=self.max_turns,
+                cwd=str(self.working_dir),
+                model=self.model,
+                permission_mode="acceptEdits",
+                setting_sources=["project"],  # Only load project skills (isolation!)
+                hooks={
+                    "PreToolUse": [
+                        HookMatcher(
+                            matcher="Skill",
+                            hooks=[capture_skill_selection],
+                        ),
+                    ],
+                },
+            )
 
-            selected_skill: str | None = None
-            confidence: float = 0.0
-            reasoning: str = ""
             raw_response: list[Any] = []
-            tool_inputs: dict[str, Any] = {}
 
-            # Collect response
-            async for message in self._client.receive_response():
-                raw_response.append(message)
+            async with ClaudeSDKClient(options=options) as client:
+                await client.query(prompt)
 
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, ToolUseBlock):
-                            if block.name in skill_names:
-                                selected_skill = block.name
-                                confidence = 0.95
-                                tool_inputs = block.input if hasattr(block, "input") else {}
-                                reasoning = (
-                                    f"Claude explicitly called {block.name} "
-                                    f"with inputs: {json.dumps(tool_inputs)}"
-                                )
-                                logger.info(f"Tool call detected: {block.name}")
+                async for message in client.receive_response():
+                    raw_response.append(message)
 
-                        elif isinstance(block, TextBlock):
-                            text = block.text.lower()
-                            for skill_name in skill_names:
-                                if skill_name.lower() in text:
-                                    if selected_skill is None:
-                                        selected_skill = skill_name
-                                        confidence = 0.6
-                                        reasoning = f"Claude mentioned {skill_name} in response"
+                    # Check for Skill tool calls in response
+                    if isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, ToolUseBlock):
+                                if block.name == "Skill" and selection_state["selected_skill"] is None:
+                                    tool_input = block.input if hasattr(block, "input") else {}
+                                    invoked_skill = tool_input.get("skill", "").lower()
+                                    if invoked_skill in skill_name_map:
+                                        selection_state["selected_skill"] = skill_name_map[invoked_skill]
+                                        selection_state["tool_input"] = tool_input
 
-                elif isinstance(message, ResultMessage):
-                    if message.is_error:
-                        logger.warning(f"Claude returned error: {message.result}")
-                        if confidence > 0:
-                            confidence *= 0.5
-                            reasoning += " (with errors)"
+                    if selection_state["selected_skill"]:
+                        break
 
             latency_ms = (time.time() - start_time) * 1000
-            logger.debug(f"Skill selection completed in {latency_ms:.1f}ms (persistent)")
+            logger.debug(f"Skill selection completed in {latency_ms:.1f}ms (client mode)")
 
+            selected = selection_state["selected_skill"] is not None
             return SkillSelection(
-                skill=selected_skill,
-                confidence=confidence,
-                reasoning=reasoning or "No clear skill selection detected",
+                skill=selection_state["selected_skill"],
+                confidence=1.0 if selected else 0.0,
+                reasoning=f"Selected: {selection_state['selected_skill']}" if selected else "No selection",
                 raw_response=raw_response,
             )
 
         except Exception as e:
             logger.error(f"Error during skill selection: {e}")
-            # Reset session on error
-            self._session_active = False
-            self._client = None
             raise AgentError(
                 message=str(e),
                 agent_name=self.name,
             ) from e
+
+    async def close(self) -> None:
+        """Clean up resources."""
+        self._client = None
+        await super().close()
