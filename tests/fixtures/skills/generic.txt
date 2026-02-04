@@ -1,0 +1,13 @@
+Email Sender
+
+A simple tool for sending emails.
+
+Use when you need to send an email to someone.
+Good for automated notifications.
+
+Parameters:
+--to: recipient email address
+--subject: email subject line
+--body: email body content
+
+Example: "Send an email to john@example.com"

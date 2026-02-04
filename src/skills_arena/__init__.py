@@ -35,6 +35,7 @@ from .exceptions import (
     TimeoutError,
     UnsupportedAgentError,
 )
+from .parser import Parser, parse
 from .models import (
     AgentResult,
     BattleResult,
@@ -85,6 +86,9 @@ __all__ = [
     "Matchup",
     "Insight",
     "Progress",
+    # Parser
+    "Parser",
+    "parse",
     # Exceptions
     "SkillsArenaError",
     "SkillParseError",

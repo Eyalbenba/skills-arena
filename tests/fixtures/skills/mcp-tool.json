@@ -1,0 +1,23 @@
+{
+    "name": "search_database",
+    "description": "Search for records in the database",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of results",
+                "default": 10
+            },
+            "filters": {
+                "type": "object",
+                "description": "Optional filters to apply"
+            }
+        },
+        "required": ["query"]
+    }
+}
