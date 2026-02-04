@@ -37,6 +37,7 @@ from .exceptions import (
 )
 from .parser import Parser, parse
 from .generator import BaseGenerator, LLMGenerator, MockGenerator
+from .scorer import ELO, RatingTracker, Scorer
 from .models import (
     AgentResult,
     BattleResult,
@@ -94,6 +95,10 @@ __all__ = [
     "BaseGenerator",
     "LLMGenerator",
     "MockGenerator",
+    # Scorer
+    "Scorer",
+    "ELO",
+    "RatingTracker",
     # Exceptions
     "SkillsArenaError",
     "SkillParseError",
