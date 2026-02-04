@@ -51,9 +51,13 @@ from .generator import LLMGenerator, MockGenerator
 from .models import (
     BattleResult,
     ComparisonResult,
+    CustomScenario,
+    Difficulty,
     EvaluationResult,
+    GenerateScenarios,
     Insight,
     Progress,
+    Scenario,
     SelectionResult,
     Skill,
     SkillSelection,
@@ -321,8 +325,9 @@ class Arena:
     def compare(
         self,
         skills: list[str | Skill],
-        task: str | Task,
+        task: str | Task | None = None,
         *,
+        scenarios: list[str | CustomScenario | GenerateScenarios] | int | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> ComparisonResult:
         """Compare multiple skills head-to-head.
@@ -332,7 +337,14 @@ class Arena:
 
         Args:
             skills: List of skill paths or Skill objects (minimum 2).
-            task: Task description (string or Task object).
+            task: Task description (string or Task object). Required if using
+                  generated scenarios.
+            scenarios: Optional custom scenarios. Can be:
+                - int: Generate this many scenarios (requires task)
+                - list[str]: Simple prompts (no expected skill)
+                - list[CustomScenario]: Full control with optional expected_skill
+                - list[GenerateScenarios]: Mix custom with generated
+                - None: Use config.scenarios count (default)
             on_progress: Optional callback for progress updates.
 
         Returns:
@@ -340,24 +352,45 @@ class Arena:
 
         Example:
             ```python
+            # LLM-generated scenarios (default)
             results = arena.compare(
                 skills=["./my-skill.md", "./competitor.md"],
                 task="web search and content extraction",
             )
-            print(f"Winner: {results.winner}")
-            print(f"Selection rates: {results.selection_rates}")
+
+            # Custom scenarios (power user)
+            from skills_arena import CustomScenario
+            results = arena.compare(
+                skills=["./my-skill.md", "./competitor.md"],
+                scenarios=[
+                    CustomScenario(prompt="Find AI news"),
+                    CustomScenario(prompt="Scrape stripe.com", expected_skill="Firecrawl"),
+                ],
+            )
+
+            # Mix custom + generated
+            from skills_arena import CustomScenario, GenerateScenarios
+            results = arena.compare(
+                skills=["./my-skill.md", "./competitor.md"],
+                task="web search",
+                scenarios=[
+                    CustomScenario(prompt="My edge case"),
+                    GenerateScenarios(count=5),
+                ],
+            )
             ```
         """
         if len(skills) < 2:
             raise NoSkillsError("compare (requires at least 2 skills)")
 
-        return asyncio.run(self.compare_async(skills, task, on_progress=on_progress))
+        return asyncio.run(self.compare_async(skills, task, scenarios=scenarios, on_progress=on_progress))
 
     async def compare_async(
         self,
         skills: list[str | Skill],
-        task: str | Task,
+        task: str | Task | None = None,
         *,
+        scenarios: list[str | CustomScenario | GenerateScenarios] | int | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> ComparisonResult:
         """Async version of compare().
@@ -373,8 +406,10 @@ class Arena:
         # Parse all skills
         parsed_skills = [self._ensure_skill(s) for s in skills]
 
-        # Convert task to Task object if needed
-        parsed_task = task if isinstance(task, Task) else Task.from_string(task)
+        # Convert task to Task object if needed (may be None for custom scenarios)
+        parsed_task = None
+        if task is not None:
+            parsed_task = task if isinstance(task, Task) else Task.from_string(task)
 
         # Report progress: parsing complete
         if on_progress:
@@ -384,54 +419,53 @@ class Arena:
                 message=f"Parsed {len(parsed_skills)} skills",
             ))
 
-        # Generate scenarios based on strategy
+        # Build scenarios list
+        final_scenarios: list[Scenario] = []
         generator = self._get_generator()
 
-        if self.config.scenario_strategy == "per_skill":
-            # Competitive analysis: generate scenarios from each skill's description alone
-            # This tests if competitors can "steal" scenarios designed for another skill
-            scenarios = []
-            scenarios_per_skill = max(1, self.config.scenarios // len(parsed_skills))
-
-            for skill in parsed_skills:
-                skill_scenarios = await generator.generate_for_skill(
-                    skill=skill,
-                    count=scenarios_per_skill,
-                )
-                scenarios.extend(skill_scenarios)
-
-                if on_progress:
-                    on_progress(Progress(
-                        stage="generation",
-                        percent=10 + (len(scenarios) / (scenarios_per_skill * len(parsed_skills))) * 20,
-                        message=f"Generated {len(scenarios)} scenarios ({skill.name})",
-                    ))
-        else:
-            # Balanced: generate scenarios for all skills together (default)
-            scenarios = await generator.generate(
+        # Handle different scenarios parameter types
+        if scenarios is None:
+            # Default: use config settings
+            if parsed_task is None:
+                raise ValueError("task is required when not providing custom scenarios")
+            final_scenarios = await self._generate_scenarios_from_config(
+                generator, parsed_skills, parsed_task, on_progress
+            )
+        elif isinstance(scenarios, int):
+            # Generate N scenarios
+            if parsed_task is None:
+                raise ValueError("task is required when generating scenarios")
+            final_scenarios = await generator.generate(
                 task=parsed_task,
                 skills=parsed_skills,
-                count=self.config.scenarios,
+                count=scenarios,
                 include_adversarial=self.config.include_adversarial,
             )
+        elif isinstance(scenarios, list):
+            # Process mixed list of custom scenarios and generate markers
+            final_scenarios = await self._process_scenario_list(
+                scenarios, generator, parsed_skills, parsed_task, on_progress
+            )
+        else:
+            raise ValueError(f"Invalid scenarios type: {type(scenarios)}")
 
         if on_progress:
             on_progress(Progress(
                 stage="generation",
                 percent=30,
-                message=f"Generated {len(scenarios)} scenarios",
+                message=f"Prepared {len(final_scenarios)} scenarios",
             ))
 
         # Run scenarios through agents with ALL skills available
         results: list[SelectionResult] = []
-        total_runs = len(scenarios) * len(self.config.agents)
+        total_runs = len(final_scenarios) * len(self.config.agents)
         completed = 0
 
         try:
             for agent_name in self.config.agents:
                 agent = self._get_agent(agent_name)
 
-                for scenario in scenarios:
+                for scenario in final_scenarios:
                     result = await self._run_scenario(
                         agent=agent,
                         prompt=scenario.prompt,
@@ -675,6 +709,119 @@ class Arena:
             "run() is not yet implemented. "
             "This will be available in Phase 1 of development."
         )
+
+    async def _generate_scenarios_from_config(
+        self,
+        generator: "BaseGenerator",
+        skills: list[Skill],
+        task: Task,
+        on_progress: ProgressCallback | None,
+    ) -> list[Scenario]:
+        """Generate scenarios based on config settings.
+
+        Args:
+            generator: The scenario generator.
+            skills: Parsed skills.
+            task: The task description.
+            on_progress: Progress callback.
+
+        Returns:
+            List of generated scenarios.
+        """
+        if self.config.scenario_strategy == "per_skill":
+            # Competitive analysis: generate scenarios from each skill's description alone
+            scenarios: list[Scenario] = []
+            scenarios_per_skill = max(1, self.config.scenarios // len(skills))
+
+            for skill in skills:
+                skill_scenarios = await generator.generate_for_skill(
+                    skill=skill,
+                    count=scenarios_per_skill,
+                )
+                scenarios.extend(skill_scenarios)
+
+                if on_progress:
+                    on_progress(Progress(
+                        stage="generation",
+                        percent=10 + (len(scenarios) / (scenarios_per_skill * len(skills))) * 20,
+                        message=f"Generated {len(scenarios)} scenarios ({skill.name})",
+                    ))
+            return scenarios
+        else:
+            # Balanced: generate scenarios for all skills together (default)
+            return await generator.generate(
+                task=task,
+                skills=skills,
+                count=self.config.scenarios,
+                include_adversarial=self.config.include_adversarial,
+            )
+
+    async def _process_scenario_list(
+        self,
+        scenario_list: list[str | CustomScenario | GenerateScenarios],
+        generator: "BaseGenerator",
+        skills: list[Skill],
+        task: Task | None,
+        on_progress: ProgressCallback | None,
+    ) -> list[Scenario]:
+        """Process a mixed list of custom scenarios and generate markers.
+
+        Args:
+            scenario_list: Mixed list of scenarios.
+            generator: The scenario generator.
+            skills: Parsed skills.
+            task: The task description (needed for generated scenarios).
+            on_progress: Progress callback.
+
+        Returns:
+            List of Scenario objects.
+        """
+        import uuid
+
+        final_scenarios: list[Scenario] = []
+
+        for item in scenario_list:
+            if isinstance(item, str):
+                # Simple string prompt - no expected skill (blind testing)
+                final_scenarios.append(Scenario(
+                    id=f"custom-{uuid.uuid4().hex[:8]}",
+                    prompt=item,
+                    expected_skill="",  # Blind - no expectation
+                    difficulty=Difficulty.MEDIUM,
+                    is_custom=True,
+                ))
+            elif isinstance(item, CustomScenario):
+                # Full custom scenario
+                final_scenarios.append(Scenario(
+                    id=f"custom-{uuid.uuid4().hex[:8]}",
+                    prompt=item.prompt,
+                    expected_skill=item.expected_skill or "",  # May be empty (blind)
+                    difficulty=Difficulty.MEDIUM,
+                    tags=item.tags,
+                    is_custom=True,
+                ))
+            elif isinstance(item, GenerateScenarios):
+                # Generate N scenarios
+                if task is None:
+                    raise ValueError("task is required when using GenerateScenarios")
+                generated = await generator.generate(
+                    task=task,
+                    skills=skills,
+                    count=item.count,
+                    include_adversarial=self.config.include_adversarial,
+                )
+                final_scenarios.extend(generated)
+
+                if on_progress:
+                    on_progress(Progress(
+                        stage="generation",
+                        percent=20,
+                        message=f"Generated {len(generated)} scenarios",
+                    ))
+            else:
+                raise ValueError(f"Invalid scenario type: {type(item)}")
+
+        return final_scenarios
 
     def _ensure_skill(self, skill: str | Skill) -> Skill:
         """Ensure we have a parsed Skill object.
