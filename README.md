@@ -1,43 +1,114 @@
-# Skills Arena
+<p align="center">
+  <img src=".assets/skillsarena_lego.png" alt="Skills Arena" width="200">
+</p>
 
-> **The SEO platform for AI agent skills** - Benchmark, optimize, and compete your skill descriptions.
+<p align="center">
+  <strong>Companies are competing for context. Is your skill winning?</strong>
+</p>
 
-## The Problem
+<p align="center">
+  <a href="https://pypi.org/project/skills-arena/"><img src="https://img.shields.io/pypi/v/skills-arena?style=flat&color=7ed957&labelColor=1a1a1a&logo=pypi&logoColor=white" alt="PyPI"></a>
+  <a href="https://github.com/Eyalbenba/skills-arena/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat&labelColor=1a1a1a" alt="License"></a>
+  <a href="https://github.com/Eyalbenba/skills-arena"><img src="https://img.shields.io/github/stars/Eyalbenba/skills-arena?style=flat&labelColor=1a1a1a&color=yellow" alt="GitHub Stars"></a>
+</p>
 
-You've built an amazing skill for your AI agent. But when a user asks a question, **will the agent actually pick your skill?**
+<p align="center">
+  <a href="#why-skills-arena">Why?</a> •
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#features">Features</a> •
+  <a href="#custom-scenarios">Custom Scenarios</a> •
+  <a href="#configuration">Configuration</a>
+</p>
 
-Just like websites compete for search engine rankings, skills compete for agent selection. Skills Arena helps you:
+---
 
-- **Measure** how often agents choose your skill
-- **Compare** your skill against competitors
-- **Optimize** descriptions for better selection rates
-- **Test** across Claude, GPT, Gemini, and more
+## Why Skills Arena?
 
-## Installation
+The battleground has moved. Developers don't Google for tools — they ask their AI assistant. And in that moment, your skill is either chosen or invisible.
+
+Every day, thousands of decisions happen inside AI context windows. Your skill vs. competitors. Your description vs. theirs. **And you have no idea who's winning.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Developer: "Find the latest AI news and summarize the key points"     │
+│                                                                         │
+│  Agent's Context Window:                                                │
+│    • Your Search Skill                                                  │
+│    • Competitor's Web Scraper                                           │
+│    • Built-in WebSearch                                                 │
+│                                                                         │
+│  ⚡ One satisfies the request. The rest are forgotten.                  │
+│  📊 Skills Arena shows you who wins — and why.                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Skills Arena lets you **benchmark the context layer** — see how your skill performs against the competition before your users do.
+
+## How It Works
+
+```
+                            ┌──────────────────────────────────────────────────────────┐
+                            │              S C E N A R I O   G E N E R A T I O N       │
+ ┌─────────────────┐        │                                                          │
+ │   YOUR SKILL    │───────▶│   "Store embeddings"       → should pick: Your Skill    │
+ │  vector-db.md   │        │   "Semantic search docs"   → should pick: Your Skill    │
+ └─────────────────┘        │   "Scale to 1B vectors"    → should pick: Your Skill    │
+                            │                                                          │
+ ┌─────────────────┐        │   "Hybrid keyword+vector"  → should pick: Competitor    │
+ │   COMPETITOR    │───────▶│   "Filter by metadata"     → should pick: Competitor    │
+ │  rival-db.md    │        │                                                          │
+ └─────────────────┘        └────────────────────────────┬─────────────────────────────┘
+                                                         │
+                                                         ▼
+                            ┌──────────────────────────────────────────────────────────┐
+                            │              A G E N T   S I M U L A T I O N             │
+                            │                                                          │
+                            │   Agent sees ALL skills in context, picks ONE per task  │
+                            │                                                          │
+                            │   ┌─────────────────────────────────────────────────┐    │
+                            │   │ "Store embeddings"                              │    │
+                            │   │  Expected: Your Skill                           │    │
+                            │   │  Agent picked: Your Skill ✅ WIN                │    │
+                            │   └─────────────────────────────────────────────────┘    │
+                            │   ┌─────────────────────────────────────────────────┐    │
+                            │   │ "Semantic search docs"                          │    │
+                            │   │  Expected: Your Skill                           │    │
+                            │   │  Agent picked: Competitor 🔴 STOLEN!            │    │
+                            │   └─────────────────────────────────────────────────┘    │
+                            └────────────────────────────┬─────────────────────────────┘
+                                                         │
+                                                         ▼
+                            ┌──────────────────────────────────────────────────────────┐
+                            │                    R E S U L T S                         │
+                            │                                                          │
+                            │   Your Skill        ████████████░░░░░░   60% selected    │
+                            │   Competitor        ████████░░░░░░░░░░   40% selected    │
+                            │                                                          │
+                            │   🔴 STEALS: Competitor won 2 of your scenarios          │
+                            │   🏆 WINNER: Your Skill (but watch those steals!)        │
+                            └──────────────────────────────────────────────────────────┘
+```
+
+**The flow:**
+1. **Input skills** — yours and the competition
+2. **Generate scenarios** — prompts where each skill *should* be chosen
+3. **Simulate** — a real agent sees all skills and picks one per task
+4. **Track** — wins, losses, and steals (when competitors take *your* scenarios)
+5. **Report** — selection rates, reasoning, and actionable insights
+
+## Quick Start
+
+### Installation
 
 ```bash
 pip install skills-arena
 ```
 
-## Quick Start
-
-### Evaluate a Single Skill
-
-```python
-from skills_arena import Arena
-
-# One line to evaluate
-results = Arena().evaluate("./my-skill.md", task="web search")
-
-print(results.score)        # 78.5
-print(results.grade)        # "B+"
-print(results.selection_rate)  # 0.78
-```
-
 ### Compare Two Skills
 
 ```python
-from skills_arena import Arena
+from skills_arena import Arena, Config
 
 arena = Arena()
 results = arena.compare(
@@ -45,183 +116,228 @@ results = arena.compare(
     task="web search and content extraction",
 )
 
-print(results.winner)           # "competitor"
-print(results.selection_rates)  # {"my-skill": 0.42, "competitor": 0.58}
-print(results.insights[0])      # "Your skill lacks specific examples..."
+print(f"Winner: {results.winner}")
+print(f"Selection rates: {results.selection_rates}")
 ```
 
-### Battle Royale (Multiple Skills)
+**Output:**
+```
+======================================================================
+RESULTS
+======================================================================
+
+🏆 Winner: Competitor Skill
+
+📊 Selection Rates:
+  My Skill             ██████               30%
+  Competitor Skill     ██████████████       70%
+
+📋 Scenarios run: 10
+
+----------------------------------------------------------------------
+🔴 STEAL DETECTION
+----------------------------------------------------------------------
+  My Skill: Lost 2 scenario(s) to competitors
+```
+
+## Features
+
+### 🎯 Realistic Skill Discovery
+
+Skills Arena tests **real skill discovery** — skills are loaded naturally into the agent's context, exactly how your users experience it. No prompt injection, no artificial setup.
+
+### 📊 Detailed Results with Reasoning
+
+See exactly **why** the agent chose each skill:
+
+```
+[Scenario 1]
+  Prompt: Find the latest AI news and summarize findings
+  Designed for: My Skill
+  Selected: Competitor Skill
+  Agent's reasoning: I'll help you research AI news. Let me use the
+                      competitor skill which handles web research...
+```
+
+### 🔴 Steal Detection
+
+Know when competitors win scenarios **designed for your skill**:
+
+```
+🔴 STEAL DETECTION
+  My Skill: Lost 2 scenario(s) to competitors
+    - scenario-abc123
+    - scenario-def456
+```
+
+### 🎮 Custom Scenarios (Power Users)
+
+Define your own test cases for regression testing, edge cases, or real production prompts:
+
+```python
+from skills_arena import Arena, CustomScenario
+
+results = arena.compare(
+    skills=["./my-skill.md", "./competitor.md"],
+    scenarios=[
+        CustomScenario(prompt="Find AI news"),  # Blind test
+        CustomScenario(
+            prompt="Scrape pricing from stripe.com",
+            expected_skill="My Skill",  # Enables steal detection
+        ),
+    ],
+)
+```
+
+### 🔀 Mix Custom + Generated Scenarios
+
+```python
+from skills_arena import CustomScenario, GenerateScenarios
+
+results = arena.compare(
+    skills=["./my-skill.md", "./competitor.md"],
+    task="web search",
+    scenarios=[
+        CustomScenario(prompt="My edge case"),
+        GenerateScenarios(count=5),  # Generate 5 more with LLM
+    ],
+)
+```
+
+## Configuration
 
 ```python
 from skills_arena import Arena, Config
 
 config = Config(
-    scenarios=100,
-    agents=["claude-code"],  # Test against Claude Code agent
+    # Scenario generation
+    scenarios=10,                       # Number of test scenarios
+    scenario_strategy="per_skill",      # "per_skill" or "balanced"
+    temperature=0.7,                    # Generation diversity
+
+    # Agent framework
+    agents=["claude-code"],             # Uses Claude Agent SDK
+
+    # Execution
+    timeout_seconds=60,                 # Per-scenario timeout
 )
 
 arena = Arena(config)
-results = arena.battle_royale(
-    skills=["./skill-a.md", "./skill-b.md", "./skill-c.md"],
-    task="data analysis",
-)
-
-print(results.leaderboard)
-# 1. skill-b (ELO: 1523)
-# 2. skill-a (ELO: 1489)
-# 3. skill-c (ELO: 1388)
 ```
 
-### Using Config File
+### Scenario Strategies
+
+| Strategy | Description |
+|----------|-------------|
+| `balanced` | Generate scenarios for all skills together (default) |
+| `per_skill` | Generate from each skill alone — reveals "steal rates" |
+
+### Environment Variables
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...   # Required
+```
+
+## API Reference
+
+### Arena Methods
+
+| Method | Description |
+|--------|-------------|
+| `arena.evaluate(skill, task)` | Evaluate a single skill |
+| `arena.compare(skills, task)` | Compare multiple skills head-to-head |
+| `arena.battle_royale(skills, task)` | Full tournament with ELO rankings |
+
+### Result Objects
 
 ```python
-from skills_arena import Arena
+# ComparisonResult
+results.winner              # Name of winning skill
+results.selection_rates     # {skill_name: rate}
+results.scenario_details    # List of ScenarioDetail
+results.steals              # {skill_name: [stolen_scenario_ids]}
+results.insights            # List of Insight
 
-arena = Arena.from_config("./arena.yaml")
-results = arena.run()
+# ScenarioDetail
+detail.prompt               # The test prompt
+detail.expected_skill       # Which skill it was designed for
+detail.selected_skill       # Which skill the agent chose
+detail.reasoning            # Agent's text before selection
+detail.was_stolen           # True if competitor won
 ```
 
-```yaml
-# arena.yaml
-task: "web search and information retrieval"
+### Custom Scenarios
 
-skills:
-  - ./skills/my-search.md
-  - ./skills/competitor.md
+```python
+from skills_arena import CustomScenario, GenerateScenarios
 
-evaluation:
-  scenarios: 50
-  agents: [claude-code]  # or: [claude-code, raw-openai]
-  mode: compare
+# Blind test (no expected skill)
+CustomScenario(prompt="Find AI news")
+
+# With expected skill (enables steal detection)
+CustomScenario(
+    prompt="Scrape the pricing table",
+    expected_skill="Web Scraper",
+    tags=["scraping", "pricing"],
+)
+
+# Generate N scenarios with LLM
+GenerateScenarios(count=5)
 ```
-
-## How It Works
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Your Skill     │────▶│    Scenario     │────▶│  Arena Runner   │
-│  Description    │     │    Generator    │     │  (Multi-Agent)  │
-└─────────────────┘     └─────────────────┘     └────────┬────────┘
-                                                         │
-                              ┌───────────────┐          │
-                              │ Selection Rate│◀─────────┘
-                              │    & Score    │
-                              └───────────────┘
-```
-
-1. **Parse** your skill description (Claude Code, OpenAI, MCP formats)
-2. **Generate** diverse test scenarios from task description
-3. **Run** scenarios through agents with competing skills
-4. **Score** based on selection rate and accuracy
-5. **Report** insights and optimization suggestions
 
 ## Key Metrics
 
-| Metric | Description | SEO Analogy |
-|--------|-------------|-------------|
-| **Selection Rate** | % of times your skill is chosen | Click-through rate |
-| **Preference Score** | ELO ranking vs competitors | Search position |
-| **Invocation Accuracy** | Correct usage when selected | Conversion rate |
-| **Description Efficiency** | Quality per token | Page speed |
+| Metric | Description | What It Means |
+|--------|-------------|---------------|
+| **Selection Rate** | % of times your skill is chosen | Your share of the context layer |
+| **Steal Rate** | % of your scenarios won by competitors | Opportunities lost to alternatives |
+| **Defense Rate** | % of your scenarios you kept | How well you hold your ground |
 
-## Supported Formats
+## Supported Agents
 
-- **Claude Code** - `.md` skill files
-- **OpenAI** - Function calling schemas (JSON)
-- **MCP** - Tool definitions
-- **Generic** - Plain text descriptions
+| Agent | Status | Notes |
+|-------|--------|-------|
+| **Claude Code** | ✅ Supported | Primary agent, uses Claude Agent SDK |
+| **Codex CLI** | 🔜 Coming | OpenAI's coding agent |
+| **Gemini CLI** | 🔜 Coming | Google's coding agent |
+| **Cursor** | 🔜 Planned | IDE-integrated agent |
+| **Windsurf** | 🔜 Planned | Codeium's coding agent |
 
-## Supported Agent Frameworks
+## Supported Skill Formats
 
-We test against **real agent frameworks**, not just raw LLM APIs:
-
-| Framework | Status | Notes |
-|-----------|--------|-------|
-| **Claude Code** | ✅ Primary | Uses Claude Code SDK (Python) |
-| **Codex** | ⚠️ Phase 2 | TypeScript-only, requires bridge |
-| **Raw Claude API** | ✅ Fallback | Direct tool_use (no agent logic) |
-| **Raw OpenAI API** | ✅ Fallback | Direct function_calling (no agent logic) |
-
-> **Why agent frameworks matter**: Claude Code and Codex have their own skill selection
-> logic, system prompts, and behaviors. Testing against raw APIs misses these real-world factors.
-
-## Configuration
-
-```python
-from skills_arena import Config
-
-config = Config(
-    # Scenario generation
-    scenarios=50,                      # Number of test scenarios
-    temperature=0.7,                   # Generation diversity
-    include_adversarial=True,          # Edge cases
-
-    # Agent frameworks to test against
-    # Options: "claude-code", "codex", "raw-claude", "raw-openai"
-    agents=["claude-code"],            # Primary: Claude Code SDK
-
-    # Execution
-    parallel_requests=10,              # Concurrency
-
-    # Output
-    verbose=True,                      # Progress feedback
-)
-```
-
-## Environment Variables
-
-```bash
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GOOGLE_API_KEY=...
-```
-
-## Example Output
-
-```
-Skills Arena - Comparison Results
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Task: web search and content extraction
-Scenarios: 100
-Agents: claude-sonnet, gpt-4o
-
-Results:
-┌──────────────────┬─────────────┬────────────┐
-│ Skill            │ Selection % │ Wins       │
-├──────────────────┼─────────────┼────────────┤
-│ tavily-search    │ 58%         │ 58         │
-│ my-search-skill  │ 42%         │ 42         │
-└──────────────────┴─────────────┴────────────┘
-
-Winner: tavily-search (+16 advantage)
-
-Insights:
-• Your skill description is 40% longer but less specific
-• Competitor has clearer "when to use" examples
-• Consider adding: API response format documentation
-```
+- **Claude Code** — `.md` skill files with YAML frontmatter
+- **OpenAI** — Function calling schemas (JSON)
+- **MCP** — Tool definitions
+- **Generic** — Plain text descriptions
 
 ## Roadmap
 
-- [x] Architecture design
-- [x] Phase 1: Core SDK (`evaluate`, `compare`)
-- [ ] Phase 2: Multi-framework support
-- [ ] Phase 3: Battle royale & ELO rankings
-- [ ] Phase 4: AI insights engine
-- [ ] Phase 5: Web UI & ecosystem
-- [ ] Phase 6: [skills.sh](https://skills.sh) integration - Browse public skills registry and compare head-to-head
+- [x] Filesystem-based skill discovery
+- [x] Custom scenarios for power users
+- [x] Agent's reasoning capture
+- [x] Steal detection
+- [ ] Web UI dashboard
+- [ ] Historical tracking & trends
+- [ ] A/B testing for skill descriptions
+- [ ] [skills.sh](https://skills.sh) integration
 
 ## Contributing
 
-This project is in early development. Contributions welcome!
+Contributions welcome! See [ARCHITECTURE.md](./ARCHITECTURE.md) for technical details.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for technical details.
+```bash
+git clone https://github.com/Eyalbenba/skills-arena.git
+cd skills-arena
+pip install -e ".[dev]"
+pytest
+```
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-*Skills Arena - Because your skill deserves to be chosen.*
+<p align="center">
+  <strong>Skills Arena</strong> — Penetrate the context layer.
+</p>
