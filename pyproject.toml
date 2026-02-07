@@ -3,11 +3,12 @@ name = "skills-arena"
 version = "0.1.0"
 description = "Benchmark and optimize AI agent skill descriptions - the SEO for agent skills"
 readme = "README.md"
-license = {text = "MIT"}
-authors = [
-    {name = "Eyal Ben Barouch", email = "eyal@tavily.com"}
-]
+license = { text = "MIT" }
 requires-python = ">=3.10"
+authors = [
+    { name = "Eyal Ben Barouch", email = "eyal@tavily.com" },
+]
+keywords = ["ai", "agents", "skills", "benchmarking", "llm", "tools", "evaluation", "ai-agents", "skill-testing"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -16,15 +17,16 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
-keywords = ["ai", "agents", "skills", "benchmarking", "llm", "tools", "evaluation"]
 
 dependencies = [
-    "claude-agent-sdk>=0.1.0",  # Claude Agent SDK (primary)
-    "anthropic>=0.40.0",        # Raw Claude API fallback
-    "openai>=1.50.0",           # Raw OpenAI API fallback
+    "claude-agent-sdk>=0.1.0",
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "httpx>=0.27.0",
@@ -32,8 +34,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Note: Codex requires Node.js + @openai/codex installed separately
-# Run: npm install -g @openai/codex typescript ts-node
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -48,9 +48,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/eyalbenba/skills-arena"
-Repository = "https://github.com/eyalbenba/skills-arena"
-Documentation = "https://github.com/eyalbenba/skills-arena#readme"
+Homepage = "https://github.com/Eyalbenba/skills-arena"
+Repository = "https://github.com/Eyalbenba/skills-arena"
+Documentation = "https://github.com/Eyalbenba/skills-arena#readme"
+Issues = "https://github.com/Eyalbenba/skills-arena/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -59,12 +60,20 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/skills_arena"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/skills_arena/",
+    "tests/",
+    "README.md",
+    "LICENSE",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 
 [tool.mypy]
 python_version = "3.10"
