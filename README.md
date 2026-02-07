@@ -21,6 +21,10 @@
   <a href="#configuration">Configuration</a>
 </p>
 
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/299da4b2-85b8-4c39-a70c-c322374c13cf" width="800" autoplay loop muted playsinline></video>
+</p>
+
 ---
 
 ## Why Skills Arena?
