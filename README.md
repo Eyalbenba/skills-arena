@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/skills-arena/"><img src="https://img.shields.io/pypi/v/skills-arena?style=flat&color=7ed957&labelColor=1a1a1a&logo=pypi&logoColor=white" alt="PyPI"></a>
-  <a href="https://github.com/Eyalbenba/skills-arena/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat&labelColor=1a1a1a" alt="License"></a>
+  <a href="https://github.com/Eyalbenba/skills-arena/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat&labelColor=1a1a1a" alt="License"></a>
   <a href="https://github.com/Eyalbenba/skills-arena"><img src="https://img.shields.io/github/stars/Eyalbenba/skills-arena?style=flat&labelColor=1a1a1a&color=yellow" alt="GitHub Stars"></a>
 </p>
 
@@ -338,7 +338,7 @@ pytest
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ---
 
