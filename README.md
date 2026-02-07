@@ -21,6 +21,10 @@
   <a href="#configuration">Configuration</a>
 </p>
 
+<p align="center">
+  <video src="https://github.com/Eyalbenba/skills-arena/raw/main/.assets/skills-arena-demo.mp4" width="800" autoplay loop muted playsinline></video>
+</p>
+
 ---
 
 ## Why Skills Arena?
