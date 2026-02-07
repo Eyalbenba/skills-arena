@@ -88,3 +88,6 @@ Thumbs.db
 results/
 *.log
 claude_dumps/
+
+# hatch-vcs generated version file
+src/skills_arena/_version.py

@@ -61,7 +61,10 @@ from .models import (
     Task,
 )
 
-__version__ = "0.1.0"
+try:
+    from ._version import __version__
+except ImportError:
+    __version__ = "0.0.0"  # fallback for editable installs without build
 
 __all__ = [
     # Main entry point
