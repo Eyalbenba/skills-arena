@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".assets/skillsarena_lego.png" alt="Skills Arena" width="200">
+  <img src=".assets/skillsarena_logo.png" alt="Skills Arena" width="200">
 </p>
 
 <p align="center">
