@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/Eyalbenba/skills-arena/raw/main/.assets/skills-arena-demo.mp4" width="800" autoplay loop muted playsinline></video>
+  <video src="https://github.com/user-attachments/assets/299da4b2-85b8-4c39-a70c-c322374c13cf" width="800" autoplay loop muted playsinline></video>
 </p>
 
 ---
