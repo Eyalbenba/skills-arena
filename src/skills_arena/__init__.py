@@ -37,6 +37,7 @@ from .exceptions import (
 )
 from .parser import Parser, parse
 from .generator import BaseGenerator, LLMGenerator, MockGenerator
+from .reporter import TextReporter, print_results
 from .scorer import ELO, RatingTracker, Scorer
 from .models import (
     AgentResult,
@@ -104,6 +105,9 @@ __all__ = [
     "BaseGenerator",
     "LLMGenerator",
     "MockGenerator",
+    # Reporter
+    "TextReporter",
+    "print_results",
     # Scorer
     "Scorer",
     "ELO",

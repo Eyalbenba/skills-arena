@@ -55,7 +55,7 @@ def evaluate(self, ...) -> EvaluationResult:
 Each component has a base class for new implementations:
 - `BaseParser` → `ClaudeCodeParser`, `OpenAIParser`, `MCPParser`
 - `BaseGenerator` → `LLMGenerator`, `MockGenerator`
-- `BaseAgent` → `ClaudeCodeAgent`, `MockAgent`, `RawClaudeAgent`
+- `BaseAgent` → `ClaudeCodeAgent`, `MockAgent`
 
 ### 4. Mock Classes for Testing
 Every component has a mock for testing without API calls:
@@ -133,8 +133,6 @@ The SDK tests against real agent frameworks, not just raw LLM APIs:
 | Agent | SDK | Status |
 |-------|-----|--------|
 | `claude-code` | claude-code-sdk | Primary |
-| `raw-claude` | anthropic | Fallback |
-| `raw-openai` | openai | Fallback |
 | `mock` | (built-in) | Testing |
 
 ## Common Tasks
@@ -172,8 +170,7 @@ for s in scenarios:
 ## Environment Variables
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...  # Required for claude-code, raw-claude
-OPENAI_API_KEY=sk-...         # Required for raw-openai
+ANTHROPIC_API_KEY=sk-ant-...  # Required for claude-code
 ```
 
 ## Dependencies
@@ -181,7 +178,6 @@ OPENAI_API_KEY=sk-...         # Required for raw-openai
 Core:
 - `claude-code-sdk>=0.0.25` - Claude Code agent framework
 - `anthropic>=0.40.0` - Anthropic API
-- `openai>=1.50.0` - OpenAI API
 - `pydantic>=2.0.0` - Data validation
 
 ## Git Workflow

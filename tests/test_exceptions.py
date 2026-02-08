@@ -137,12 +137,12 @@ class TestUnsupportedAgentError:
         """Test error message format."""
         error = UnsupportedAgentError(
             "invalid-agent",
-            supported=["claude-code", "raw-openai"],
+            supported=["claude-code", "mock"],
         )
         assert "invalid-agent" in str(error)
         assert "claude-code" in str(error)
         assert error.agent_name == "invalid-agent"
-        assert "raw-openai" in error.supported
+        assert "mock" in error.supported
 
 
 class TestCodexBridgeError:

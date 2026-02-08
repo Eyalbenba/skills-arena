@@ -29,7 +29,7 @@ class TestConfig:
         config = Config(
             scenarios=100,
             temperature=0.5,
-            agents=["claude-code", "raw-openai"],
+            agents=["claude-code", "mock"],
             verbose=True,
         )
         assert config.scenarios == 100
@@ -44,7 +44,7 @@ class TestConfig:
 
     def test_valid_agents(self) -> None:
         """Test all valid agent names."""
-        valid_agents = ["claude-code", "codex", "raw-claude", "raw-openai", "mock"]
+        valid_agents = ["claude-code", "codex", "mock"]
         config = Config(agents=valid_agents)
         assert config.agents == valid_agents
 
@@ -171,7 +171,7 @@ evaluation:
   scenarios: 100
   agents:
     - claude-code
-    - raw-openai
+    - mock
   temperature: 0.5
 """
         with tempfile.NamedTemporaryFile(

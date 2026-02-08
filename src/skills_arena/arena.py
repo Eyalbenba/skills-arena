@@ -8,6 +8,7 @@ and result scoring.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -46,7 +47,7 @@ def _suppress_asyncio_shutdown_errors() -> None:
     loop.set_exception_handler(quiet_handler)
 
 from .config import ArenaConfig, Config, ProgressCallback
-from .exceptions import NoSkillsError
+from .exceptions import APIKeyError, NoSkillsError
 from .generator import LLMGenerator, MockGenerator
 from .models import (
     BattleResult,
@@ -125,6 +126,21 @@ class Arena:
         """
         arena_config = ArenaConfig.from_yaml(path)
         return cls(config=arena_config.evaluation)
+
+    def _validate_api_keys(self) -> None:
+        """Validate that required API keys are available before running.
+
+        Only checks for keys that the configured agents actually need.
+        This provides early failure with a clear message instead of
+        failing mid-run after scenario generation.
+
+        Raises:
+            APIKeyError: If a required API key is missing.
+        """
+        if "claude-code" in self.config.agents:
+            key = self.config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if not key:
+                raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY")
 
     def _get_generator(self) -> BaseGenerator:
         """Get or create the scenario generator."""
@@ -256,6 +272,8 @@ class Arena:
 
         See evaluate() for full documentation.
         """
+        self._validate_api_keys()
+
         # Parse skill if needed
         parsed_skill = self._ensure_skill(skill)
 
@@ -397,6 +415,8 @@ class Arena:
 
         See compare() for full documentation.
         """
+        self._validate_api_keys()
+
         # Suppress asyncio shutdown errors from SDK cleanup
         _suppress_asyncio_shutdown_errors()
 
@@ -541,6 +561,8 @@ class Arena:
 
         See battle_royale() for full documentation.
         """
+        self._validate_api_keys()
+
         if len(skills) < 2:
             raise NoSkillsError("battle_royale (requires at least 2 skills)")
 
@@ -756,6 +778,74 @@ class Arena:
                 include_adversarial=self.config.include_adversarial,
             )
 
+    @staticmethod
+    def _build_skill_name_lookup(skills: list[Skill]) -> dict[str, str]:
+        """Build a lookup dict mapping name variants to canonical skill names.
+
+        Maps lowercase, slug (hyphenated), and underscore forms so that
+        user-provided expected_skill values like "firecrawl-extract" resolve
+        to the parsed canonical name "Firecrawl Extract".
+
+        Args:
+            skills: Parsed skill objects.
+
+        Returns:
+            Dict mapping lowercased variants to canonical names.
+        """
+        lookup: dict[str, str] = {}
+        for skill in skills:
+            canonical = skill.name
+            # Exact lowercase
+            lookup[canonical.lower()] = canonical
+            # Slug form: "Firecrawl Extract" -> "firecrawl-extract"
+            slug = canonical.lower().replace(" ", "-").replace("_", "-")
+            lookup[slug] = canonical
+            # Underscore form: "Firecrawl Extract" -> "firecrawl_extract"
+            underscore = canonical.lower().replace(" ", "_").replace("-", "_")
+            lookup[underscore] = canonical
+        return lookup
+
+    def _resolve_expected_skill(
+        self,
+        expected_skill: str,
+        lookup: dict[str, str],
+        skills: list[Skill],
+    ) -> str:
+        """Resolve a user-provided expected_skill to the canonical skill name.
+
+        Args:
+            expected_skill: The user-provided expected skill identifier.
+            lookup: Name variant lookup dict.
+            skills: Parsed skill objects (for error message).
+
+        Returns:
+            The canonical skill name.
+
+        Raises:
+            ValueError: If the expected_skill doesn't match any input skill.
+        """
+        # Try exact match first
+        if expected_skill in {s.name for s in skills}:
+            return expected_skill
+        # Try lowercase / slug / underscore lookup
+        key = expected_skill.lower()
+        if key in lookup:
+            return lookup[key]
+        # Try slug form of the input
+        slug_key = key.replace(" ", "-").replace("_", "-")
+        if slug_key in lookup:
+            return lookup[slug_key]
+        # Try underscore form of the input
+        underscore_key = key.replace(" ", "_").replace("-", "_")
+        if underscore_key in lookup:
+            return lookup[underscore_key]
+
+        valid_names = sorted(s.name for s in skills)
+        raise ValueError(
+            f"expected_skill '{expected_skill}' does not match any input skill. "
+            f"Valid skill names are: {valid_names}"
+        )
+
     async def _process_scenario_list(
         self,
         scenario_list: list[str | CustomScenario | GenerateScenarios],
@@ -779,6 +869,7 @@ class Arena:
         import uuid
 
         final_scenarios: list[Scenario] = []
+        skill_lookup = self._build_skill_name_lookup(skills)
 
         for item in scenario_list:
             if isinstance(item, str):
@@ -791,11 +882,16 @@ class Arena:
                     is_custom=True,
                 ))
             elif isinstance(item, CustomScenario):
-                # Full custom scenario
+                # Full custom scenario — resolve expected_skill to canonical name
+                resolved_expected = ""
+                if item.expected_skill:
+                    resolved_expected = self._resolve_expected_skill(
+                        item.expected_skill, skill_lookup, skills
+                    )
                 final_scenarios.append(Scenario(
                     id=f"custom-{uuid.uuid4().hex[:8]}",
                     prompt=item.prompt,
-                    expected_skill=item.expected_skill or "",  # May be empty (blind)
+                    expected_skill=resolved_expected,
                     difficulty=Difficulty.MEDIUM,
                     tags=item.tags,
                     is_custom=True,

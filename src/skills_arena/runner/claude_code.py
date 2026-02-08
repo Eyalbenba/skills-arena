@@ -111,6 +111,16 @@ class ClaudeCodeAgent(BaseAgent):
                 "Install with: pip install claude-agent-sdk"
             )
 
+        if shutil.which("claude") is None:
+            raise AgentError(
+                message=(
+                    "The 'claude' CLI binary was not found on PATH. "
+                    "The Claude Agent SDK requires Claude Code to be installed. "
+                    "Install it with: npm install -g @anthropic-ai/claude-code"
+                ),
+                agent_name="claude-code",
+            )
+
         self.model = model
         self.max_turns = max_turns
         self.timeout_seconds = timeout_seconds

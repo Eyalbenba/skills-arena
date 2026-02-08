@@ -23,8 +23,6 @@ class BaseAgent(ABC):
 
     Supported agents:
     - ClaudeCodeAgent: Uses the Claude Agent SDK (claude-agent-sdk)
-    - RawClaudeAgent: Direct Anthropic API with tool_use
-    - RawOpenAIAgent: Direct OpenAI API with function_calling
     - MockAgent: Deterministic responses for testing
     """
 
