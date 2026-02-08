@@ -26,7 +26,6 @@ classifiers = [
 dependencies = [
     "claude-agent-sdk>=0.1.0",
     "anthropic>=0.40.0",
-    "openai>=1.50.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "httpx>=0.27.0",

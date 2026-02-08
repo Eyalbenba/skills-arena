@@ -1,10 +1,12 @@
 """Reporter module.
 
 Provides output formatting for results:
-- JSON
-- Markdown
-- DataFrame (pandas)
+- TextReporter: Human-readable text output
 """
 
-# Reporter classes will be exported here once implemented
-__all__: list[str] = []
+from .text import TextReporter, print_results
+
+__all__ = [
+    "TextReporter",
+    "print_results",
+]

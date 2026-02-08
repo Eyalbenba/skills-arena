@@ -61,7 +61,7 @@ class Config(BaseModel):
     scenario_strategy: str = Field(default="balanced")
 
     # Agent frameworks to test against
-    # Options: "claude-code", "codex", "raw-claude", "raw-openai", "mock"
+    # Options: "claude-code", "codex", "mock"
     agents: list[str] = Field(default_factory=lambda: ["claude-code"])
 
     # Execution
@@ -86,7 +86,7 @@ class Config(BaseModel):
     @classmethod
     def validate_agents(cls, v: list[str]) -> list[str]:
         """Validate agent names are supported."""
-        valid_agents = {"claude-code", "codex", "raw-claude", "raw-openai", "mock"}
+        valid_agents = {"claude-code", "codex", "mock"}
         for agent in v:
             if agent not in valid_agents:
                 raise ValueError(

@@ -302,8 +302,6 @@ Executes scenarios against **agent frameworks** (not raw LLM APIs).
 |-----------|-----|----------|--------|-------|
 | **Claude Code** | `claude-code-sdk` | Python | ✅ Primary | Official Anthropic agent framework |
 | **Codex** | `@openai/codex` | TypeScript only | ⚠️ Limited | Requires TS subprocess bridge |
-| **Raw Claude API** | `anthropic` | Python | ✅ Fallback | Direct tool_use (no agent logic) |
-| **Raw OpenAI API** | `openai` | Python | ✅ Fallback | Direct function_calling (no agent logic) |
 
 #### Claude Code SDK Integration
 
@@ -398,22 +396,6 @@ we need a bridge solution.
 
 **Recommendation**: Start with Claude Code SDK only for MVP. Add Codex via subprocess bridge in Phase 2.
 
-#### Raw API Fallback
-
-For comparison, we also support raw LLM APIs (without agent framework logic):
-
-```python
-class RawClaudeAgent(BaseAgent):
-    """Direct Anthropic API with tool_use - no Claude Code agent logic"""
-
-class RawOpenAIAgent(BaseAgent):
-    """Direct OpenAI API with function_calling - no Codex agent logic"""
-```
-
-This lets users compare:
-- How Claude Code selects skills vs raw Claude API
-- How Codex selects skills vs raw OpenAI API
-
 ```python
 class Runner:
     def __init__(self, agents: List[str] = ["claude-code"]):
@@ -423,8 +405,6 @@ class Runner:
         agents = {
             "claude-code": ClaudeCodeAgent,      # Claude Code SDK
             "codex": CodexAgent,                  # Codex via TS bridge
-            "raw-claude": RawClaudeAgent,         # Direct Anthropic API
-            "raw-openai": RawOpenAIAgent,         # Direct OpenAI API
             "mock": MockAgent,                    # For testing
         }
         return agents[name]()
@@ -554,7 +534,7 @@ class Config:
     include_adversarial: bool = True
 
     # Agent frameworks to test against
-    # Options: "claude-code", "codex", "raw-claude", "raw-openai"
+    # Options: "claude-code", "codex", "mock"
     agents: List[str] = field(default_factory=lambda: ["claude-code"])
 
     # Execution
@@ -675,30 +655,12 @@ Python (skills-arena) ──JSON──▶ subprocess ──▶ TypeScript (codex
 - Requires Node.js installed
 - More complex debugging
 
-**Alternative**: Use `raw-openai` for OpenAI API without Codex agent logic.
-
-### Raw API Fallbacks
-
-For comparison without agent framework logic:
-
-```python
-# Raw Claude API (tool_use, no Claude Code agent logic)
-arena = Arena(Config(agents=["raw-claude"]))
-
-# Raw OpenAI API (function_calling, no Codex agent logic)
-arena = Arena(Config(agents=["raw-openai"]))
-```
-
-These only require the respective API keys, no additional setup.
-
 ### Comparison Matrix
 
 | Agent | Language | Setup | Latency | Realism |
 |-------|----------|-------|---------|---------|
 | `claude-code` | Python | Easy | Fast | High (real agent) |
 | `codex` | TS→Python bridge | Medium | +100-200ms | High (real agent) |
-| `raw-claude` | Python | Easy | Fast | Medium (no agent logic) |
-| `raw-openai` | Python | Easy | Fast | Medium (no agent logic) |
 
 **Recommendation for MVP**: Start with `claude-code` only. Add `codex` in Phase 2.
 
@@ -783,8 +745,6 @@ skills-arena/
 │       │   ├── base.py          # Agent interface
 │       │   ├── claude_code.py   # Claude Code SDK agent
 │       │   ├── codex.py         # Codex via TS bridge
-│       │   ├── raw_claude.py    # Raw Anthropic API
-│       │   ├── raw_openai.py    # Raw OpenAI API
 │       │   └── mock.py          # Testing
 │       │
 │       ├── bridges/
@@ -855,8 +815,7 @@ keywords = ["ai", "agents", "skills", "benchmarking", "llm", "tools"]
 
 dependencies = [
     "claude-code-sdk>=0.1.0",  # Claude Code agent framework
-    "anthropic>=0.40.0",       # Raw Claude API fallback
-    "openai>=1.50.0",          # Raw OpenAI API fallback
+    "anthropic>=0.40.0",       # Anthropic API
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
     "httpx>=0.27.0",

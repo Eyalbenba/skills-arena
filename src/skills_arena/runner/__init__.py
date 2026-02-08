@@ -2,8 +2,6 @@
 
 Provides agent implementations for running scenarios:
 - ClaudeCodeAgent: Uses the Claude Agent SDK (claude-agent-sdk)
-- RawClaudeAgent: Direct Anthropic API with tool_use
-- RawOpenAIAgent: Direct OpenAI API with function_calling
 - MockAgent: Deterministic responses for testing
 
 Example:
@@ -37,16 +35,6 @@ except ImportError as e:
     ClaudeCodeAgentWithClient = None  # type: ignore
     ClaudeCodeAgentWithTools = None  # type: ignore
 
-try:
-    from .raw_claude import RawClaudeAgent
-except ImportError:
-    RawClaudeAgent = None  # type: ignore
-
-try:
-    from .raw_openai import RawOpenAIAgent
-except ImportError:
-    RawOpenAIAgent = None  # type: ignore
-
 
 def get_agent(name: str, **kwargs) -> BaseAgent:
     """Factory function to get an agent by name.
@@ -54,8 +42,6 @@ def get_agent(name: str, **kwargs) -> BaseAgent:
     Args:
         name: Agent name. One of:
             - "claude-code": Claude Agent SDK
-            - "raw-claude": Direct Anthropic API
-            - "raw-openai": Direct OpenAI API
             - "mock": Mock agent for testing
         **kwargs: Additional arguments passed to the agent constructor.
 
@@ -73,8 +59,6 @@ def get_agent(name: str, **kwargs) -> BaseAgent:
     """
     agents = {
         "claude-code": ClaudeCodeAgent,
-        "raw-claude": RawClaudeAgent,
-        "raw-openai": RawOpenAIAgent,
         "mock": MockAgent,
     }
 
@@ -99,8 +83,6 @@ __all__ = [
     # Agents
     "ClaudeCodeAgent",
     "ClaudeCodeAgentWithTools",
-    "RawClaudeAgent",
-    "RawOpenAIAgent",
     "MockAgent",
     "ScriptedMockAgent",
     # Factory
