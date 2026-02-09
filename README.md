@@ -22,7 +22,9 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/299da4b2-85b8-4c39-a70c-c322374c13cf" width="800" autoplay loop muted playsinline></video>
+  <a href="https://youtu.be/1W36o6pcxrQ">
+    <img src="https://img.youtube.com/vi/1W36o6pcxrQ/maxresdefault.jpg" alt="Skills Arena Demo" width="800">
+  </a>
 </p>
 
 ---
