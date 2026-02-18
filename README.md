@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Companies are competing for context. Is your skill winning?</strong>
+  <strong>Is your skill winning the context window?</strong>
 </p>
 
 <p align="center">
@@ -30,15 +30,15 @@
 
 ## Why Skills Arena?
 
-The battleground has moved. Developers don't Google for tools — they ask their AI assistant. And in that moment, your skill is either chosen or invisible.
+Your skill's description is the most important copy you'll ever write. It's read by coding agents thousands of times a day, and it determines whether your product gets used or ignored.
 
-Every day, thousands of decisions happen inside AI context windows. Your skill vs. competitors. Your description vs. theirs. **And you have no idea who's winning.**
+**Skills are the new SEO.** Just like you used to optimize for Google's algorithm, you now need to optimize for the coding agent's decision-making process. Every day, thousands of decisions happen inside context windows — your skill vs. competitors, your description vs. theirs. **And you have no idea who's winning.**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  Developer: "Find the latest AI news and summarize the key points"     │
 │                                                                         │
-│  Agent's Context Window:                                                │
+│  Coding Agent's Context Window:                                         │
 │    • Your Search Skill                                                  │
 │    • Competitor's Web Scraper                                           │
 │    • Built-in WebSearch                                                 │
@@ -48,7 +48,9 @@ Every day, thousands of decisions happen inside AI context windows. Your skill v
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Skills Arena lets you **benchmark the context layer** — see how your skill performs against the competition before your users do.
+Skills Arena is an **Agent Skill Optimization** framework — benchmark and optimize your skill descriptions so coding agents choose you.
+
+> *You spent months building a great product. You wrote a skill so agents can use it. But right now, inside thousands of terminals, a coding agent is reading your skill description next to your competitor's — and choosing theirs. You never even knew it happened.*
 
 ## How It Works
 
@@ -344,5 +346,5 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <strong>Skills Arena</strong> — Penetrate the context layer.
+  <strong>Skills Arena</strong> — Skills are the new SEO.
 </p>
