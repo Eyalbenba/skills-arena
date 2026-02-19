@@ -48,7 +48,7 @@ Your skill's description is the most important copy you'll ever write. It's read
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Skills Arena is an **Agent Skill Optimization** framework — benchmark and optimize your skill descriptions so coding agents choose you.
+Skills Arena is a **skill discovery optimization** framework — benchmark and improve how coding agents find and choose your skill.
 
 > *You spent months building a great product. You wrote a skill so agents can use it. But right now, inside thousands of terminals, a coding agent is reading your skill description next to your competitor's — and choosing theirs. You never even knew it happened.*
 
