@@ -393,6 +393,60 @@ class BattleResult(BaseModel):
     scenarios_run: int = 0
 
 
+class OptimizationIteration(BaseModel):
+    """Results from a single optimization iteration.
+
+    Attributes:
+        iteration: The iteration number (1-indexed).
+        skill_before: The skill description before this iteration.
+        skill_after: The skill description after this iteration.
+        comparison_before: Comparison results before optimization.
+        comparison_after: Comparison results after optimization.
+        selection_rate_before: Selection rate before this iteration.
+        selection_rate_after: Selection rate after this iteration.
+        improvement: Delta in selection rate.
+        reasoning: LLM's explanation of changes made.
+    """
+
+    iteration: int
+    skill_before: Skill
+    skill_after: Skill
+    comparison_before: ComparisonResult
+    comparison_after: ComparisonResult
+    selection_rate_before: float
+    selection_rate_after: float
+    improvement: float
+    reasoning: str = ""
+
+
+class OptimizationResult(BaseModel):
+    """The outcome of optimizing a skill description.
+
+    Attributes:
+        original_skill: The skill before any optimization.
+        optimized_skill: The best skill found during optimization.
+        iterations: Details for each optimization iteration.
+        total_improvement: Total delta in selection rate.
+        selection_rate_before: Selection rate before optimization.
+        selection_rate_after: Selection rate after optimization.
+        grade_before: Letter grade before optimization.
+        grade_after: Letter grade after optimization.
+        scenarios_used: Number of scenarios used per comparison run.
+        competitors: Names of competitor skills.
+    """
+
+    original_skill: Skill
+    optimized_skill: Skill
+    iterations: list[OptimizationIteration] = Field(default_factory=list)
+    total_improvement: float = 0.0
+    selection_rate_before: float = 0.0
+    selection_rate_after: float = 0.0
+    grade_before: Grade = Grade.F
+    grade_after: Grade = Grade.F
+    scenarios_used: int = 0
+    competitors: list[str] = Field(default_factory=list)
+
+
 class Progress(BaseModel):
     """Progress information for long-running operations.
 

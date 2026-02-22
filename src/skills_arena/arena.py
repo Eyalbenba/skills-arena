@@ -47,7 +47,7 @@ def _suppress_asyncio_shutdown_errors() -> None:
     loop.set_exception_handler(quiet_handler)
 
 from .config import ArenaConfig, Config, ProgressCallback
-from .exceptions import APIKeyError, NoSkillsError
+from .exceptions import APIKeyError, NoSkillsError, OptimizerError
 from .generator import LLMGenerator, MockGenerator
 from .models import (
     BattleResult,
@@ -56,7 +56,10 @@ from .models import (
     Difficulty,
     EvaluationResult,
     GenerateScenarios,
+    Grade,
     Insight,
+    OptimizationIteration,
+    OptimizationResult,
     Progress,
     Scenario,
     SelectionResult,
@@ -64,6 +67,7 @@ from .models import (
     SkillSelection,
     Task,
 )
+from .optimizer import SkillOptimizer
 from .parser import Parser
 from .runner import MockAgent, get_agent
 from .scorer import Scorer
@@ -637,6 +641,286 @@ class Arena:
             on_progress(Progress(stage="complete", percent=100, message="Battle complete"))
 
         return battle_result
+
+    def optimize(
+        self,
+        skill: str | Skill,
+        competitors: list[str | Skill],
+        task: str | Task,
+        *,
+        max_iterations: int = 1,
+        baseline: ComparisonResult | None = None,
+        write_back: bool = False,
+        on_progress: ProgressCallback | None = None,
+    ) -> OptimizationResult:
+        """Optimize a skill description to improve selection rate.
+
+        Runs a compare → rewrite → verify loop to iteratively improve the
+        skill description based on competition data.
+
+        Args:
+            skill: Path to skill file or Skill object to optimize.
+            competitors: Competitor skills to optimize against.
+            task: Task description for scenario generation.
+            max_iterations: Maximum optimization iterations (default 1).
+            baseline: Optional pre-computed baseline ComparisonResult.
+            write_back: If True, overwrite the source file with the optimized description.
+            on_progress: Optional callback for progress updates.
+
+        Returns:
+            OptimizationResult with before/after comparison and optimized skill.
+
+        Example:
+            ```python
+            result = arena.optimize(
+                skill="./my-skill.md",
+                competitors=["./competitor.md"],
+                task="web search",
+            )
+            print(f"Improvement: {result.total_improvement:+.0%}")
+            print(f"Grade: {result.grade_before.value} → {result.grade_after.value}")
+            ```
+        """
+        if len(competitors) < 1:
+            raise NoSkillsError("optimize (requires at least 1 competitor)")
+
+        return asyncio.run(self.optimize_async(
+            skill, competitors, task,
+            max_iterations=max_iterations,
+            baseline=baseline,
+            write_back=write_back,
+            on_progress=on_progress,
+        ))
+
+    async def optimize_async(
+        self,
+        skill: str | Skill,
+        competitors: list[str | Skill],
+        task: str | Task,
+        *,
+        max_iterations: int = 1,
+        baseline: ComparisonResult | None = None,
+        write_back: bool = False,
+        on_progress: ProgressCallback | None = None,
+    ) -> OptimizationResult:
+        """Async version of optimize().
+
+        See optimize() for full documentation.
+        """
+        self._validate_api_keys()
+
+        # Parse inputs
+        parsed_skill = self._ensure_skill(skill)
+        parsed_competitors = [self._ensure_skill(c) for c in competitors]
+        parsed_task = task if isinstance(task, Task) else Task.from_string(task)
+
+        if on_progress:
+            on_progress(Progress(
+                stage="parsing",
+                percent=5,
+                message=f"Parsed {1 + len(parsed_competitors)} skills",
+            ))
+
+        # Step 1: Baseline comparison (or reuse provided one)
+        if baseline is not None:
+            baseline_result = baseline
+        else:
+            if on_progress:
+                on_progress(Progress(
+                    stage="baseline",
+                    percent=10,
+                    message="Running baseline comparison...",
+                ))
+            all_skills = [parsed_skill, *parsed_competitors]
+            baseline_result = await self.compare_async(
+                all_skills, parsed_task, on_progress=None,
+            )
+
+        # Build frozen scenarios from baseline for consistent verification
+        frozen_scenarios = [
+            CustomScenario(
+                prompt=d.prompt,
+                expected_skill=d.expected_skill or None,
+            )
+            for d in baseline_result.scenario_details
+        ]
+
+        skill_name = parsed_skill.name
+        baseline_rate = baseline_result.selection_rates.get(skill_name, 0.0)
+
+        if on_progress:
+            # Show baseline summary
+            rates_str = "  ".join(
+                f"{name}: {rate:.0%}" for name, rate in
+                sorted(baseline_result.selection_rates.items(), key=lambda x: -x[1])
+            )
+            on_progress(Progress(
+                stage="baseline",
+                percent=15,
+                message=f"Winner: {baseline_result.winner} | {rates_str}",
+            ))
+            # Show per-scenario breakdown
+            for d in baseline_result.scenario_details:
+                stolen_tag = " << STOLEN" if d.was_stolen else ""
+                on_progress(Progress(
+                    stage="baseline",
+                    percent=15,
+                    message=f"  [{d.expected_skill[:15]:>15s}] -> {d.selected_skill or 'None':<15s}{stolen_tag} | {d.prompt[:60]}",
+                ))
+            # Show steals summary
+            stolen_count = sum(1 for d in baseline_result.scenario_details if d.was_stolen)
+            on_progress(Progress(
+                stage="baseline",
+                percent=20,
+                message=f"Baseline: {skill_name} at {baseline_rate:.0%} | {stolen_count} scenario(s) stolen | {len(frozen_scenarios)} frozen for verification",
+            ))
+
+        # Create optimizer
+        optimizer = SkillOptimizer(
+            model=self.config.generator_model,
+            temperature=0.3,
+            api_key=self.config.anthropic_api_key,
+        )
+
+        # Iterative optimization loop
+        iterations: list[OptimizationIteration] = []
+        current_skill = parsed_skill
+        current_result = baseline_result
+        current_rate = baseline_rate
+        best_skill = parsed_skill
+        best_rate = baseline_rate
+
+        for i in range(max_iterations):
+            iter_num = i + 1
+            if on_progress:
+                iter_pct = 20 + (i / max_iterations) * 70
+                on_progress(Progress(
+                    stage="optimizing",
+                    percent=iter_pct,
+                    message=f"Iteration {iter_num}/{max_iterations}: rewriting description...",
+                ))
+
+            # Step 2: LLM rewrite
+            try:
+                optimized_skill, reasoning = await optimizer.optimize_description(
+                    skill=current_skill,
+                    comparison_result=current_result,
+                    competitors=parsed_competitors,
+                )
+            except OptimizerError:
+                raise
+            except Exception as e:
+                raise OptimizerError(
+                    f"Unexpected error during optimization: {e}",
+                    skill_name=skill_name,
+                ) from e
+
+            if on_progress:
+                on_progress(Progress(
+                    stage="optimizing",
+                    percent=iter_pct + (15 / max_iterations),
+                    message=f"Iteration {iter_num} rewrite done: {reasoning[:100]}",
+                ))
+                on_progress(Progress(
+                    stage="verifying",
+                    percent=iter_pct + (20 / max_iterations),
+                    message=f"Iteration {iter_num}/{max_iterations}: verifying with {len(frozen_scenarios)} frozen scenarios...",
+                ))
+
+            # Step 3: Verify with frozen scenarios
+            verify_skills = [optimized_skill, *parsed_competitors]
+            verify_result = await self.compare_async(
+                verify_skills, parsed_task,
+                scenarios=frozen_scenarios,
+                on_progress=None,
+            )
+
+            new_rate = verify_result.selection_rates.get(skill_name, 0.0)
+            improvement = new_rate - current_rate
+
+            if on_progress:
+                # Show verification results
+                rates_str = "  ".join(
+                    f"{name}: {rate:.0%}" for name, rate in
+                    sorted(verify_result.selection_rates.items(), key=lambda x: -x[1])
+                )
+                on_progress(Progress(
+                    stage="verifying",
+                    percent=iter_pct + (35 / max_iterations),
+                    message=f"Iteration {iter_num} result: {rates_str} ({improvement:+.0%})",
+                ))
+                for d in verify_result.scenario_details:
+                    stolen_tag = " << STOLEN" if d.was_stolen else ""
+                    on_progress(Progress(
+                        stage="verifying",
+                        percent=iter_pct + (35 / max_iterations),
+                        message=f"  [{d.expected_skill[:15]:>15s}] -> {d.selected_skill or 'None':<15s}{stolen_tag} | {d.prompt[:60]}",
+                    ))
+
+            iteration = OptimizationIteration(
+                iteration=iter_num,
+                skill_before=current_skill,
+                skill_after=optimized_skill,
+                comparison_before=current_result,
+                comparison_after=verify_result,
+                selection_rate_before=current_rate,
+                selection_rate_after=new_rate,
+                improvement=improvement,
+                reasoning=reasoning,
+            )
+            iterations.append(iteration)
+
+            # Track best result
+            if new_rate > best_rate:
+                best_skill = optimized_skill
+                best_rate = new_rate
+
+            # Step 4: Regression guard — stop if getting worse
+            if improvement < 0 and iter_num < max_iterations:
+                if on_progress:
+                    on_progress(Progress(
+                        stage="stopped",
+                        percent=90,
+                        message=f"Stopped: iteration {iter_num} regressed ({improvement:+.0%})",
+                    ))
+                break
+
+            # Prepare for next iteration
+            current_skill = optimized_skill
+            current_result = verify_result
+            current_rate = new_rate
+
+        # Step 5: Build final result
+        total_improvement = best_rate - baseline_rate
+
+        # Write back to source file if requested
+        if write_back and best_skill.source_path:
+            from pathlib import Path
+            source = Path(best_skill.source_path)
+            if source.exists():
+                source.write_text(best_skill.description)
+
+        result = OptimizationResult(
+            original_skill=parsed_skill,
+            optimized_skill=best_skill,
+            iterations=iterations,
+            total_improvement=total_improvement,
+            selection_rate_before=baseline_rate,
+            selection_rate_after=best_rate,
+            grade_before=Grade.from_score(baseline_rate * 100),
+            grade_after=Grade.from_score(best_rate * 100),
+            scenarios_used=len(frozen_scenarios),
+            competitors=[c.name for c in parsed_competitors],
+        )
+
+        if on_progress:
+            on_progress(Progress(
+                stage="complete",
+                percent=100,
+                message=f"Optimization complete: {baseline_rate:.0%} → {best_rate:.0%} ({total_improvement:+.0%})",
+            ))
+
+        return result
 
     def insights(
         self,

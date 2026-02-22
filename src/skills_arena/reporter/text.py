@@ -6,7 +6,8 @@ and battle royale results.
 
 from __future__ import annotations
 
-from ..models import BattleResult, ComparisonResult, EvaluationResult
+from ..models import BattleResult, ComparisonResult, EvaluationResult, OptimizationResult
+from ..parser.base import estimate_tokens
 
 
 class TextReporter:
@@ -139,8 +140,116 @@ class TextReporter:
 
         return "\n".join(lines)
 
+    def format_optimization(self, result: OptimizationResult) -> str:
+        """Format an OptimizationResult as text.
 
-def print_results(result: EvaluationResult | ComparisonResult | BattleResult) -> None:
+        Args:
+            result: The optimization result to format.
+
+        Returns:
+            Formatted string.
+        """
+        W = 70
+        lines = [
+            "=" * W,
+            "OPTIMIZATION RESULTS",
+            "=" * W,
+            f"Skill:       {result.original_skill.name}",
+            f"Competitors: {', '.join(result.competitors)}",
+            f"Scenarios:   {result.scenarios_used}  |  Iterations: {len(result.iterations)}",
+            "",
+        ]
+
+        # Token counts
+        tokens_before = estimate_tokens(result.original_skill.description)
+        tokens_after = estimate_tokens(result.optimized_skill.description)
+        token_delta = tokens_after - tokens_before
+        token_arrow = "+" if token_delta > 0 else ""
+        token_warn = "  (over 200!)" if tokens_after > 200 else ""
+
+        # Before/After summary with bars
+        imp = result.total_improvement
+        arrow = "+" if imp > 0 else ""
+        lines.append("Before -> After:")
+        lines.append(
+            f"  Selection Rate:  {self._bar(result.selection_rate_before, 20)} {result.selection_rate_before:.0%}"
+            f"  ->  {self._bar(result.selection_rate_after, 20)} {result.selection_rate_after:.0%}"
+            f"  ({arrow}{imp:.0%})"
+        )
+        lines.append(
+            f"  Grade:           {result.grade_before.value:>3s}"
+            f"  ->  {result.grade_after.value:<3s}"
+        )
+        lines.append(
+            f"  Tokens:          {tokens_before:>3d}"
+            f"  ->  {tokens_after:<3d} ({token_arrow}{token_delta}){token_warn}"
+        )
+
+        # Per-iteration details
+        for iteration in result.iterations:
+            lines.append("")
+            lines.append("-" * W)
+            imp_i = iteration.improvement
+            arrow_i = "+" if imp_i > 0 else ""
+            status = "improved" if imp_i > 0 else ("no change" if imp_i == 0 else "regressed")
+            lines.append(
+                f"Iteration {iteration.iteration}:  "
+                f"{iteration.selection_rate_before:.0%} -> {iteration.selection_rate_after:.0%}  "
+                f"({arrow_i}{imp_i:.0%})  [{status}]"
+            )
+            if iteration.reasoning:
+                lines.append("")
+                # Word-wrap reasoning at ~65 chars
+                reasoning = iteration.reasoning
+                while len(reasoning) > 65:
+                    wrap_at = reasoning.rfind(" ", 0, 65)
+                    if wrap_at == -1:
+                        wrap_at = 65
+                    lines.append(f"  {reasoning[:wrap_at]}")
+                    reasoning = reasoning[wrap_at:].lstrip()
+                if reasoning:
+                    lines.append(f"  {reasoning}")
+
+            # Show scenario-level detail from the AFTER comparison
+            after_details = iteration.comparison_after.scenario_details
+            if after_details:
+                skill_name = result.original_skill.name
+                stolen = [d for d in after_details if d.was_stolen]
+                won = [d for d in after_details if d.expected_skill == skill_name and not d.was_stolen]
+                lines.append("")
+                lines.append(f"  Scenarios:  {len(won)} won  |  {len(stolen)} stolen")
+                for d in after_details:
+                    tag = " STOLEN" if d.was_stolen else ""
+                    prompt_preview = d.prompt[:50] + ("..." if len(d.prompt) > 50 else "")
+                    lines.append(
+                        f"    {d.expected_skill:>15s} -> {(d.selected_skill or 'None'):<15s}"
+                        f"{tag:>7s}  {prompt_preview}"
+                    )
+
+        # Optimized description
+        lines.append("")
+        lines.append("=" * W)
+        lines.append("OPTIMIZED DESCRIPTION")
+        lines.append("-" * W)
+        # Preserve original line breaks in description
+        for desc_line in result.optimized_skill.description.splitlines():
+            lines.append(desc_line)
+
+        # When to use
+        if result.optimized_skill.when_to_use:
+            lines.append("")
+            lines.append("WHEN TO USE")
+            lines.append("-" * W)
+            for use in result.optimized_skill.when_to_use:
+                lines.append(f"  - {use}")
+
+        lines.append("")
+        lines.append("=" * W)
+
+        return "\n".join(lines)
+
+
+def print_results(result: EvaluationResult | ComparisonResult | BattleResult | OptimizationResult) -> None:
     """Convenience function to print formatted results.
 
     Automatically detects the result type and prints the appropriate format.
@@ -164,5 +273,7 @@ def print_results(result: EvaluationResult | ComparisonResult | BattleResult) ->
         print(reporter.format_comparison(result))
     elif isinstance(result, BattleResult):
         print(reporter.format_battle(result))
+    elif isinstance(result, OptimizationResult):
+        print(reporter.format_optimization(result))
     else:
         raise TypeError(f"Unsupported result type: {type(result).__name__}")

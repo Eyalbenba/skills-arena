@@ -30,6 +30,7 @@ from .exceptions import (
     GeneratorError,
     InsufficientScenariosError,
     NoSkillsError,
+    OptimizerError,
     SkillParseError,
     SkillsArenaError,
     TimeoutError,
@@ -37,6 +38,7 @@ from .exceptions import (
 )
 from .parser import Parser, parse
 from .generator import BaseGenerator, LLMGenerator, MockGenerator
+from .optimizer import SkillOptimizer
 from .reporter import TextReporter, print_results
 from .scorer import ELO, RatingTracker, Scorer
 from .models import (
@@ -50,6 +52,8 @@ from .models import (
     Grade,
     Insight,
     Matchup,
+    OptimizationIteration,
+    OptimizationResult,
     Parameter,
     Progress,
     RankedSkill,
@@ -93,11 +97,15 @@ __all__ = [
     "EvaluationResult",
     "ComparisonResult",
     "BattleResult",
+    "OptimizationResult",
+    "OptimizationIteration",
     "AgentResult",
     "RankedSkill",
     "Matchup",
     "Insight",
     "Progress",
+    # Optimizer
+    "SkillOptimizer",
     # Parser
     "Parser",
     "parse",
@@ -124,4 +132,5 @@ __all__ = [
     "CodexBridgeError",
     "NoSkillsError",
     "InsufficientScenariosError",
+    "OptimizerError",
 ]
