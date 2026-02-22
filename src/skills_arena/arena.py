@@ -870,8 +870,8 @@ class Arena:
             )
             iterations.append(iteration)
 
-            # Track best result
-            if new_rate > best_rate:
+            # Track best result (prefer rewritten on tie — cleaner description)
+            if new_rate >= best_rate:
                 best_skill = optimized_skill
                 best_rate = new_rate
 
