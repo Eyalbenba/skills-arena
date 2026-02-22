@@ -147,6 +147,50 @@ RESULTS
   My Skill: Lost 2 scenario(s) to competitors
 ```
 
+### Optimize a Skill
+
+Lost the comparison? Let the optimizer fix it:
+
+```python
+result = arena.optimize(
+    skill="./my-skill.md",
+    competitors=["./competitor.md"],
+    task="web search and content extraction",
+    max_iterations=2,
+)
+
+print_results(result)
+```
+
+**Output:**
+```
+======================================================================
+OPTIMIZATION RESULTS
+======================================================================
+Skill:       My Skill
+Competitors: Competitor Skill
+Scenarios:   6  |  Iterations: 2
+
+Before -> After:
+  Selection Rate:  ███████░░░░░░░░░░░░░ 33%  ->  █████████████░░░░░░░ 67%  (+34%)
+  Grade:             F  ->  D
+  Tokens:           43  ->  40  (-3)
+
+----------------------------------------------------------------------
+Iteration 1:  33% -> 67%  (+34%)  [improved]
+
+  Added concrete usage examples, specified output format,
+  and differentiated from scraping tools.
+
+  Scenarios:  3 won  |  0 stolen
+```
+
+The optimizer runs a **compare → rewrite → verify** loop:
+1. Baseline comparison to measure current performance
+2. LLM rewrites the description using competition data and stolen scenario reasoning
+3. Verifies improvement using the same frozen scenarios
+4. Repeats if `max_iterations > 1` (stops on regression)
+
 ## Features
 
 ### 🎯 Realistic Skill Discovery
@@ -254,6 +298,7 @@ ANTHROPIC_API_KEY=sk-ant-...   # Required
 | `arena.evaluate(skill, task)` | Evaluate a single skill |
 | `arena.compare(skills, task)` | Compare multiple skills head-to-head |
 | `arena.battle_royale(skills, task)` | Full tournament with ELO rankings |
+| `arena.optimize(skill, competitors, task)` | Auto-improve a skill description |
 
 ### Result Objects
 
@@ -271,6 +316,16 @@ detail.expected_skill       # Which skill it was designed for
 detail.selected_skill       # Which skill the agent chose
 detail.reasoning            # Agent's text before selection
 detail.was_stolen           # True if competitor won
+
+# OptimizationResult
+result.original_skill       # Skill before optimization
+result.optimized_skill      # Best skill found
+result.iterations           # List of OptimizationIteration
+result.total_improvement    # Delta in selection rate
+result.selection_rate_before  # Starting selection rate
+result.selection_rate_after   # Final selection rate
+result.grade_before         # Grade before (A+ to F)
+result.grade_after          # Grade after
 ```
 
 ### Custom Scenarios
@@ -323,9 +378,9 @@ GenerateScenarios(count=5)
 - [x] Custom scenarios for power users
 - [x] Agent's reasoning capture
 - [x] Steal detection
+- [x] Auto-optimize skill descriptions
 - [ ] Web UI dashboard
 - [ ] Historical tracking & trends
-- [ ] A/B testing for skill descriptions
 - [ ] [skills.sh](https://skills.sh) integration
 
 ## Contributing

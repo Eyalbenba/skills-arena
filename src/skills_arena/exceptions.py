@@ -174,6 +174,20 @@ class NoSkillsError(SkillsArenaError):
         super().__init__(message)
 
 
+class OptimizerError(SkillsArenaError):
+    """Error during skill optimization.
+
+    Raised when the optimizer fails to improve a skill description.
+    """
+
+    def __init__(self, message: str, skill_name: str | None = None):
+        self.skill_name = skill_name
+        full_message = f"Optimization failed: {message}"
+        if skill_name:
+            full_message = f"Optimization failed for '{skill_name}': {message}"
+        super().__init__(full_message)
+
+
 class InsufficientScenariosError(SkillsArenaError):
     """Not enough scenarios for evaluation.
 
