@@ -33,14 +33,11 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..exceptions import AgentError, APIKeyError
 from ..models import Skill, SkillSelection
 from .base import BaseAgent
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -318,10 +315,14 @@ class ClaudeCodeAgent(BaseAgent):
                 selection_state["tool_input"] = tool_input
                 logger.info(f"★ Skill selection captured: {selected_skill_name}")
 
-                # Block execution - we only wanted to see the choice
+                # Block tool execution AND stop the conversation gracefully.
+                # "continue": False tells the CLI to stop, which causes it to
+                # emit a final ResultMessage with total_cost_usd.
                 return {
                     "decision": "block",
                     "reason": f"Selection recorded: {selected_skill_name}",
+                    "continue": False,
+                    "stopReason": f"Skill selection captured: {selected_skill_name}",
                 }
 
             # Allow built-in tools (Read, Glob, Bash, etc.) to run normally
@@ -372,12 +373,30 @@ class ClaudeCodeAgent(BaseAgent):
             loop.set_exception_handler(suppress_cancel_scope_errors)
 
             # Query Claude and let it naturally decide
+            # The PreToolUse hook returns continue=False when a skill is selected,
+            # which tells the CLI to stop gracefully and emit a ResultMessage with cost.
             message_count = 0
+            cost_usd = 0.0
+            got_selection = False
             try:
                 async for message in query(prompt=prompt, options=options):
                     message_count += 1
                     message_type = type(message).__name__
                     raw_response.append(message)
+
+                    # Always capture ResultMessage (has cost data), even after selection
+                    if isinstance(message, ResultMessage):
+                        cost_usd = message.total_cost_usd or 0.0
+                        logger.debug(
+                            f"  └─ ResultMessage: turns={message.num_turns}, "
+                            f"error={message.is_error}, cost=${cost_usd:.4f}"
+                        )
+                        break  # ResultMessage is always last
+
+                    # Once we have a selection, skip processing but keep draining
+                    # for the ResultMessage (the hook's continue=False stops the CLI)
+                    if got_selection:
+                        continue
 
                     # Log each message type
                     logger.debug(f"[Message {message_count}] Type: {message_type}")
@@ -431,17 +450,14 @@ class ClaudeCodeAgent(BaseAgent):
                                     selection_state["tool_input"] = tool_input
                                     logger.info(f"  └─ ★ SKILL SELECTED: {block.name}")
 
-                    elif isinstance(message, ResultMessage):
-                        logger.debug(f"  └─ ResultMessage: turns={message.num_turns}, error={message.is_error}")
-
-                    # Stop once we have a selection - don't waste more tokens
+                    # Mark selection — don't break, let the loop drain for ResultMessage
                     if selection_state["selected_skill"]:
                         if not selection_state.get("_logged"):
                             logger.info(f"<<< SELECTED: {selection_state['selected_skill']}")
                             selection_state["_logged"] = True
-                        break
+                        got_selection = True
             except (asyncio.CancelledError, RuntimeError):
-                # Ignore errors during cleanup when breaking out of async generator
+                # Ignore errors during cleanup
                 pass
             finally:
                 # Restore original exception handler
@@ -462,6 +478,7 @@ class ClaudeCodeAgent(BaseAgent):
                 confidence=1.0 if selected else 0.0,
                 reasoning=reasoning,
                 raw_response=raw_response,
+                cost_usd=cost_usd,
             )
 
         except Exception as e:
@@ -598,7 +615,12 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                 if invoked_skill in skill_name_map:
                     selection_state["selected_skill"] = skill_name_map[invoked_skill]
                     selection_state["tool_input"] = tool_input
-                    return {"decision": "block", "reason": f"Selection: {skill_name_map[invoked_skill]}"}
+                    return {
+                        "decision": "block",
+                        "reason": f"Selection: {skill_name_map[invoked_skill]}",
+                        "continue": False,
+                        "stopReason": f"Skill selection captured: {skill_name_map[invoked_skill]}",
+                    }
             return {}
 
         try:
@@ -620,12 +642,22 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
             )
 
             raw_response: list[Any] = []
+            cost_usd = 0.0
+            got_selection = False
 
             async with ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
 
                 async for message in client.receive_response():
                     raw_response.append(message)
+
+                    # Always capture ResultMessage for cost data
+                    if isinstance(message, ResultMessage):
+                        cost_usd = message.total_cost_usd or 0.0
+                        break
+
+                    if got_selection:
+                        continue
 
                     # Check for Skill tool calls in response
                     if isinstance(message, AssistantMessage):
@@ -639,7 +671,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                                         selection_state["tool_input"] = tool_input
 
                     if selection_state["selected_skill"]:
-                        break
+                        got_selection = True
 
             latency_ms = (time.time() - start_time) * 1000
             logger.debug(f"Skill selection completed in {latency_ms:.1f}ms (client mode)")
@@ -650,6 +682,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                 confidence=1.0 if selected else 0.0,
                 reasoning=f"Selected: {selection_state['selected_skill']}" if selected else "No selection",
                 raw_response=raw_response,
+                cost_usd=cost_usd,
             )
 
         except Exception as e:

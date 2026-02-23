@@ -339,6 +339,11 @@ class Arena:
         # Score results
         evaluation_result = Scorer.score_evaluation(parsed_skill, results)
 
+        # Accumulate cost from all selection runs + generator
+        total_cost = sum(r.selection.cost_usd for r in results)
+        total_cost += generator.last_cost_usd
+        evaluation_result.total_cost_usd = total_cost
+
         if on_progress:
             on_progress(Progress(stage="complete", percent=100, message="Evaluation complete"))
 
@@ -515,6 +520,11 @@ class Arena:
         # Score comparison
         comparison_result = Scorer.score_comparison(parsed_skills, results)
 
+        # Accumulate cost from all selection runs + generator
+        total_cost = sum(r.selection.cost_usd for r in results)
+        total_cost += generator.last_cost_usd
+        comparison_result.total_cost_usd = total_cost
+
         if on_progress:
             on_progress(Progress(stage="complete", percent=100, message="Comparison complete"))
 
@@ -636,6 +646,11 @@ class Arena:
             results,
             k_factor=self.config.elo_k_factor,
         )
+
+        # Accumulate cost from all selection runs + generator
+        total_cost = sum(r.selection.cost_usd for r in results)
+        total_cost += generator.last_cost_usd
+        battle_result.total_cost_usd = total_cost
 
         if on_progress:
             on_progress(Progress(stage="complete", percent=100, message="Battle complete"))
@@ -802,7 +817,7 @@ class Arena:
 
             # Step 2: LLM rewrite
             try:
-                optimized_skill, reasoning = await optimizer.optimize_description(
+                optimized_skill, reasoning, rewrite_cost = await optimizer.optimize_description(
                     skill=current_skill,
                     comparison_result=current_result,
                     competitors=parsed_competitors,
@@ -857,6 +872,9 @@ class Arena:
                         message=f"  [{d.expected_skill[:15]:>15s}] -> {d.selected_skill or 'None':<15s}{stolen_tag} | {d.prompt[:60]}",
                     ))
 
+            # Iteration cost = rewrite LLM call + verification compare run
+            iteration_cost = rewrite_cost + verify_result.total_cost_usd
+
             iteration = OptimizationIteration(
                 iteration=iter_num,
                 skill_before=current_skill,
@@ -867,6 +885,7 @@ class Arena:
                 selection_rate_after=new_rate,
                 improvement=improvement,
                 reasoning=reasoning,
+                cost_usd=iteration_cost,
             )
             iterations.append(iteration)
 
@@ -900,6 +919,10 @@ class Arena:
             if source.exists():
                 source.write_text(best_skill.description)
 
+        # Total cost = baseline compare + all iteration costs
+        total_cost = baseline_result.total_cost_usd
+        total_cost += sum(it.cost_usd for it in iterations)
+
         result = OptimizationResult(
             original_skill=parsed_skill,
             optimized_skill=best_skill,
@@ -911,6 +934,7 @@ class Arena:
             grade_after=Grade.from_score(best_rate * 100),
             scenarios_used=len(frozen_scenarios),
             competitors=[c.name for c in parsed_competitors],
+            total_cost_usd=total_cost,
         )
 
         if on_progress:

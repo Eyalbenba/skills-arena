@@ -273,6 +273,7 @@ def _make_mock_response(data: dict) -> MagicMock:
     block.text = json.dumps(data)
     response = MagicMock()
     response.content = [block]
+    response.usage = MagicMock(input_tokens=100, output_tokens=50)
     return response
 
 
@@ -379,7 +380,7 @@ class TestOptimizeDescription:
         mock_client.messages.create.return_value = _make_mock_response(response_data)
         optimizer._client = mock_client
 
-        optimized, reasoning = await optimizer.optimize_description(
+        optimized, reasoning, _cost = await optimizer.optimize_description(
             skill=skill_a,
             comparison_result=comparison_result,
             competitors=[skill_b],
@@ -411,7 +412,7 @@ class TestOptimizeDescription:
         mock_client.messages.create.return_value = _make_mock_response(response_data)
         optimizer._client = mock_client
 
-        optimized, _ = await optimizer.optimize_description(
+        optimized, _, _cost = await optimizer.optimize_description(
             skill=skill,
             comparison_result=comparison_result,
             competitors=[skill_b],
@@ -442,7 +443,7 @@ class TestOptimizeDescription:
         mock_client.messages.create.return_value = response
         optimizer._client = mock_client
 
-        optimized, reasoning = await optimizer.optimize_description(
+        optimized, reasoning, _cost = await optimizer.optimize_description(
             skill=skill_a,
             comparison_result=comparison_result,
             competitors=[skill_b],
@@ -554,7 +555,7 @@ class TestOptimizeDescription:
         mock_client.messages.create.return_value = _make_mock_response(response_data)
         optimizer._client = mock_client
 
-        optimized, _ = await optimizer.optimize_description(
+        optimized, _, _cost = await optimizer.optimize_description(
             skill=skill_a,
             comparison_result=comparison_result,
             competitors=[skill_b],
@@ -593,7 +594,7 @@ class TestArenaOptimize:
             SkillOptimizer,
             "optimize_description",
             new_callable=AsyncMock,
-            return_value=(improved_skill, "Added examples"),
+            return_value=(improved_skill, "Added examples", 0.01),
         ):
             result = await arena_mock.optimize_async(
                 skill=skill_a,
@@ -621,7 +622,7 @@ class TestArenaOptimize:
             SkillOptimizer,
             "optimize_description",
             new_callable=AsyncMock,
-            return_value=(improved_skill, "Reused baseline"),
+            return_value=(improved_skill, "Reused baseline", 0.01),
         ):
             result = await arena_mock.optimize_async(
                 skill=skill_a,
@@ -653,7 +654,7 @@ class TestArenaOptimize:
             SkillOptimizer,
             "optimize_description",
             new_callable=AsyncMock,
-            return_value=(improved_skill, "Changes"),
+            return_value=(improved_skill, "Changes", 0.01),
         ), patch.object(arena_mock, "compare_async", side_effect=tracking_compare):
             await arena_mock.optimize_async(
                 skill=skill_a,
@@ -686,7 +687,7 @@ class TestArenaOptimize:
             SkillOptimizer,
             "optimize_description",
             new_callable=AsyncMock,
-            return_value=(improved_skill, "reason"),
+            return_value=(improved_skill, "reason", 0.01),
         ):
             await arena_mock.optimize_async(
                 skill=skill_a,
@@ -712,8 +713,8 @@ class TestArenaOptimize:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return (v1, "Iteration 1 changes")
-            return (v2, "Iteration 2 changes")
+                return (v1, "Iteration 1 changes", 0.01)
+            return (v2, "Iteration 2 changes", 0.01)
 
         with patch.object(
             SkillOptimizer,
@@ -773,7 +774,7 @@ class TestArenaOptimize:
             SkillOptimizer,
             "optimize_description",
             new_callable=AsyncMock,
-            return_value=(worse_skill, "Made it worse"),
+            return_value=(worse_skill, "Made it worse", 0.01),
         ), patch.object(
             arena_mock, "compare_async", side_effect=mock_compare,
         ):
@@ -799,7 +800,7 @@ class TestArenaOptimize:
             SkillOptimizer,
             "optimize_description",
             new_callable=AsyncMock,
-            return_value=(improved, "reason"),
+            return_value=(improved, "reason", 0.01),
         ):
             result = arena_mock.optimize(
                 skill=skill_a,

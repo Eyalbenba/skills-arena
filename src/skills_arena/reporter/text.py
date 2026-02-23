@@ -46,6 +46,7 @@ class TextReporter:
             f"Selection Rate:      {self._bar(result.selection_rate)} {result.selection_rate:.0%}",
             f"Invocation Accuracy: {self._bar(result.invocation_accuracy)} {result.invocation_accuracy:.0%}",
             f"False Positive Rate: {self._bar(result.false_positive_rate)} {result.false_positive_rate:.0%}",
+            f"Cost: ${result.total_cost_usd:.4f}",
         ]
 
         if result.per_agent:
@@ -75,6 +76,7 @@ class TextReporter:
             f"{'=' * 50}",
             f"Winner: {result.winner}",
             f"Scenarios: {result.scenarios_run}",
+            f"Cost: ${result.total_cost_usd:.4f}",
             "",
             "Selection Rates:",
         ]
@@ -126,6 +128,7 @@ class TextReporter:
             f"Battle Royale Results",
             f"{'=' * 50}",
             f"Scenarios: {result.scenarios_run}",
+            f"Cost: ${result.total_cost_usd:.4f}",
             "",
             "Leaderboard:",
             f"  {'Rank':<6} {'Skill':<30} {'ELO':<8} {'W/L':<10} {'Sel Rate'}",
@@ -157,6 +160,7 @@ class TextReporter:
             f"Skill:       {result.original_skill.name}",
             f"Competitors: {', '.join(result.competitors)}",
             f"Scenarios:   {result.scenarios_used}  |  Iterations: {len(result.iterations)}",
+            f"Total Cost:  ${result.total_cost_usd:.4f}",
             "",
         ]
 
@@ -195,7 +199,8 @@ class TextReporter:
             lines.append(
                 f"Iteration {iteration.iteration}:  "
                 f"{iteration.selection_rate_before:.0%} -> {iteration.selection_rate_after:.0%}  "
-                f"({arrow_i}{imp_i:.0%})  [{status}]"
+                f"({arrow_i}{imp_i:.0%})  [{status}]  "
+                f"Cost: ${iteration.cost_usd:.4f}"
             )
             if iteration.reasoning:
                 lines.append("")
