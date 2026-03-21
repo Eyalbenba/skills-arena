@@ -142,9 +142,12 @@ class Arena:
             APIKeyError: If a required API key is missing.
         """
         if "claude-code" in self.config.agents:
-            key = self.config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
-            if not key:
-                raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY")
+            has_api_key = self.config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+            has_oauth = self.config.claude_oauth_token or os.environ.get(
+                "CLAUDE_CODE_OAUTH_TOKEN", os.environ.get("CLAUDE_AGENT_OAUTH_TOKEN")
+            )
+            if not has_api_key and not has_oauth:
+                raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
 
     def _get_generator(self) -> BaseGenerator:
         """Get or create the scenario generator."""
@@ -163,7 +166,10 @@ class Arena:
     def _get_agent(self, name: str) -> BaseAgent:
         """Get or create an agent by name."""
         if name not in self._agents:
-            self._agents[name] = get_agent(name)
+            kwargs: dict = {}
+            if name == "claude-code" and self.config.claude_oauth_token:
+                kwargs["oauth_token"] = self.config.claude_oauth_token
+            self._agents[name] = get_agent(name, **kwargs)
         return self._agents[name]
 
     async def _cleanup_agents(self) -> None:
@@ -338,6 +344,11 @@ class Arena:
 
         # Score results
         evaluation_result = Scorer.score_evaluation(parsed_skill, results)
+
+        # Accumulate cost from all selection runs + generator
+        total_cost = sum(r.selection.cost_usd for r in results)
+        total_cost += generator.last_cost_usd
+        evaluation_result.total_cost_usd = total_cost
 
         if on_progress:
             on_progress(Progress(stage="complete", percent=100, message="Evaluation complete"))
@@ -515,6 +526,11 @@ class Arena:
         # Score comparison
         comparison_result = Scorer.score_comparison(parsed_skills, results)
 
+        # Accumulate cost from all selection runs + generator
+        total_cost = sum(r.selection.cost_usd for r in results)
+        total_cost += generator.last_cost_usd
+        comparison_result.total_cost_usd = total_cost
+
         if on_progress:
             on_progress(Progress(stage="complete", percent=100, message="Comparison complete"))
 
@@ -636,6 +652,11 @@ class Arena:
             results,
             k_factor=self.config.elo_k_factor,
         )
+
+        # Accumulate cost from all selection runs + generator
+        total_cost = sum(r.selection.cost_usd for r in results)
+        total_cost += generator.last_cost_usd
+        battle_result.total_cost_usd = total_cost
 
         if on_progress:
             on_progress(Progress(stage="complete", percent=100, message="Battle complete"))
@@ -802,7 +823,7 @@ class Arena:
 
             # Step 2: LLM rewrite
             try:
-                optimized_skill, reasoning = await optimizer.optimize_description(
+                optimized_skill, reasoning, rewrite_cost = await optimizer.optimize_description(
                     skill=current_skill,
                     comparison_result=current_result,
                     competitors=parsed_competitors,
@@ -857,6 +878,9 @@ class Arena:
                         message=f"  [{d.expected_skill[:15]:>15s}] -> {d.selected_skill or 'None':<15s}{stolen_tag} | {d.prompt[:60]}",
                     ))
 
+            # Iteration cost = rewrite LLM call + verification compare run
+            iteration_cost = rewrite_cost + verify_result.total_cost_usd
+
             iteration = OptimizationIteration(
                 iteration=iter_num,
                 skill_before=current_skill,
@@ -867,6 +891,7 @@ class Arena:
                 selection_rate_after=new_rate,
                 improvement=improvement,
                 reasoning=reasoning,
+                cost_usd=iteration_cost,
             )
             iterations.append(iteration)
 
@@ -900,6 +925,10 @@ class Arena:
             if source.exists():
                 source.write_text(best_skill.description)
 
+        # Total cost = baseline compare + all iteration costs
+        total_cost = baseline_result.total_cost_usd
+        total_cost += sum(it.cost_usd for it in iterations)
+
         result = OptimizationResult(
             original_skill=parsed_skill,
             optimized_skill=best_skill,
@@ -911,6 +940,7 @@ class Arena:
             grade_after=Grade.from_score(best_rate * 100),
             scenarios_used=len(frozen_scenarios),
             competitors=[c.name for c in parsed_competitors],
+            total_cost_usd=total_cost,
         )
 
         if on_progress:

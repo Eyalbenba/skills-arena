@@ -17,6 +17,8 @@ class BaseGenerator(ABC):
     that should trigger skill selection by agents.
     """
 
+    last_cost_usd: float = 0.0
+
     @abstractmethod
     async def generate(
         self,

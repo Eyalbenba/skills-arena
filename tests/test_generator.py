@@ -309,7 +309,7 @@ class TestLLMGeneratorUnit:
             "is_adversarial": True,
         }
 
-        scenario = gen._dict_to_scenario(data, 0)
+        scenario = gen._dict_to_scenario(data)
 
         assert scenario.prompt == "Find something"
         assert scenario.expected_skill == "search"
@@ -323,7 +323,7 @@ class TestLLMGeneratorUnit:
         gen = LLMGenerator()
 
         data = {"prompt": "Test", "expected_skill": "skill"}
-        scenario = gen._dict_to_scenario(data, 0)
+        scenario = gen._dict_to_scenario(data)
 
         assert scenario.difficulty == Difficulty.MEDIUM
 
@@ -332,7 +332,7 @@ class TestLLMGeneratorUnit:
         gen = LLMGenerator()
 
         data = {"prompt": "Test", "expected_skill": "skill", "difficulty": "invalid"}
-        scenario = gen._dict_to_scenario(data, 0)
+        scenario = gen._dict_to_scenario(data)
 
         assert scenario.difficulty == Difficulty.MEDIUM
 

@@ -215,6 +215,7 @@ class SkillSelection(BaseModel):
     confidence: float = 0.0
     reasoning: str = ""
     raw_response: Any = None
+    cost_usd: float = 0.0
 
 
 class SelectionResult(BaseModel):
@@ -293,6 +294,7 @@ class EvaluationResult(BaseModel):
     per_agent: dict[str, AgentResult] = Field(default_factory=dict)
     insights: list[Insight] = Field(default_factory=list)
     scenarios_run: int = 0
+    total_cost_usd: float = 0.0
 
 
 class ScenarioDetail(BaseModel):
@@ -337,6 +339,7 @@ class ComparisonResult(BaseModel):
     scenarios_run: int = 0
     scenario_details: list[ScenarioDetail] = Field(default_factory=list)
     steals: dict[str, list[str]] = Field(default_factory=dict)  # skill -> [stolen scenario_ids]
+    total_cost_usd: float = 0.0
 
 
 class RankedSkill(BaseModel):
@@ -391,6 +394,7 @@ class BattleResult(BaseModel):
     matchups: list[Matchup] = Field(default_factory=list)
     insights: list[Insight] = Field(default_factory=list)
     scenarios_run: int = 0
+    total_cost_usd: float = 0.0
 
 
 class OptimizationIteration(BaseModel):
@@ -417,6 +421,7 @@ class OptimizationIteration(BaseModel):
     selection_rate_after: float
     improvement: float
     reasoning: str = ""
+    cost_usd: float = 0.0
 
 
 class OptimizationResult(BaseModel):
@@ -445,6 +450,7 @@ class OptimizationResult(BaseModel):
     grade_after: Grade = Grade.F
     scenarios_used: int = 0
     competitors: list[str] = Field(default_factory=list)
+    total_cost_usd: float = 0.0
 
 
 class Progress(BaseModel):

@@ -33,14 +33,11 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..exceptions import AgentError, APIKeyError
 from ..models import Skill, SkillSelection
 from .base import BaseAgent
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +92,7 @@ class ClaudeCodeAgent(BaseAgent):
         timeout_seconds: int = 60,
         working_dir: str | Path | None = None,
         api_key: str | None = None,
+        oauth_token: str | None = None,
     ):
         """Initialize the Claude Code agent.
 
@@ -104,6 +102,9 @@ class ClaudeCodeAgent(BaseAgent):
             timeout_seconds: Request timeout.
             working_dir: Working directory for Claude (defaults to temp dir).
             api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var).
+            oauth_token: Claude Code OAuth token from monthly subscription.
+                Checked in order: oauth_token param, CLAUDE_CODE_OAUTH_TOKEN env,
+                CLAUDE_AGENT_OAUTH_TOKEN env. Alternative to api_key.
         """
         if not CLAUDE_SDK_AVAILABLE:
             raise ImportError(
@@ -125,6 +126,10 @@ class ClaudeCodeAgent(BaseAgent):
         self.max_turns = max_turns
         self.timeout_seconds = timeout_seconds
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self._oauth_token = oauth_token or os.environ.get(
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            os.environ.get("CLAUDE_AGENT_OAUTH_TOKEN"),
+        )
 
         # Working directory - use temp dir by default for isolation
         if working_dir is None:
@@ -244,8 +249,11 @@ class ClaudeCodeAgent(BaseAgent):
         Returns:
             SkillSelection with the chosen skill.
         """
-        if not self._api_key:
-            raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY")
+        if not self._api_key and not self._oauth_token:
+            raise APIKeyError(
+                "Anthropic",
+                "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN",
+            )
 
         if not available_skills:
             return SkillSelection(
@@ -318,16 +326,28 @@ class ClaudeCodeAgent(BaseAgent):
                 selection_state["tool_input"] = tool_input
                 logger.info(f"★ Skill selection captured: {selected_skill_name}")
 
-                # Block execution - we only wanted to see the choice
+                # Block tool execution AND stop the conversation gracefully.
+                # "continue": False tells the CLI to stop, which causes it to
+                # emit a final ResultMessage with total_cost_usd.
                 return {
                     "decision": "block",
                     "reason": f"Selection recorded: {selected_skill_name}",
+                    "continue": False,
+                    "stopReason": f"Skill selection captured: {selected_skill_name}",
                 }
 
             # Allow built-in tools (Read, Glob, Bash, etc.) to run normally
             return {}
 
         try:
+            # Build env overrides for authentication
+            env: dict[str, str] = {}
+            if self._oauth_token:
+                env["CLAUDE_CODE_OAUTH_TOKEN"] = self._oauth_token
+                if not self._api_key:
+                    # Force OAuth by clearing API key so the SDK doesn't look for one
+                    env["ANTHROPIC_API_KEY"] = ""
+
             # Configure with vanilla settings - no custom system prompt
             # Skills are discovered from .claude/skills/ via setting_sources
             options = ClaudeAgentOptions(
@@ -336,6 +356,7 @@ class ClaudeCodeAgent(BaseAgent):
                 model=self.model,
                 permission_mode="acceptEdits",  # Don't prompt for permissions
                 setting_sources=["project"],  # Only load project skills (isolation!)
+                **({"env": env} if env else {}),
                 hooks={
                     "PreToolUse": [
                         # Intercept Skill tool calls
@@ -372,12 +393,23 @@ class ClaudeCodeAgent(BaseAgent):
             loop.set_exception_handler(suppress_cancel_scope_errors)
 
             # Query Claude and let it naturally decide
+            # The PreToolUse hook blocks tool execution when a skill is selected.
             message_count = 0
+            cost_usd = 0.0
             try:
                 async for message in query(prompt=prompt, options=options):
                     message_count += 1
                     message_type = type(message).__name__
                     raw_response.append(message)
+
+                    # Capture cost from ResultMessage if it arrives
+                    if isinstance(message, ResultMessage):
+                        cost_usd = message.total_cost_usd or 0.0
+                        logger.debug(
+                            f"  └─ ResultMessage: turns={message.num_turns}, "
+                            f"error={message.is_error}, cost=${cost_usd:.4f}"
+                        )
+                        break
 
                     # Log each message type
                     logger.debug(f"[Message {message_count}] Type: {message_type}")
@@ -405,7 +437,6 @@ class ClaudeCodeAgent(BaseAgent):
                                 text_preview = block.text[:150].replace('\n', ' ')
                                 logger.debug(f"  └─ TextBlock: {text_preview}...")
 
-
                             elif isinstance(block, ToolUseBlock):
                                 # Log tool call details
                                 tool_input = block.input if hasattr(block, "input") else {}
@@ -431,17 +462,13 @@ class ClaudeCodeAgent(BaseAgent):
                                     selection_state["tool_input"] = tool_input
                                     logger.info(f"  └─ ★ SKILL SELECTED: {block.name}")
 
-                    elif isinstance(message, ResultMessage):
-                        logger.debug(f"  └─ ResultMessage: turns={message.num_turns}, error={message.is_error}")
-
-                    # Stop once we have a selection - don't waste more tokens
+                    # Break as soon as we have a selection — don't wait for ResultMessage
+                    # since continue=False in the hook may not always emit one reliably.
                     if selection_state["selected_skill"]:
-                        if not selection_state.get("_logged"):
-                            logger.info(f"<<< SELECTED: {selection_state['selected_skill']}")
-                            selection_state["_logged"] = True
+                        logger.info(f"<<< SELECTED: {selection_state['selected_skill']}")
                         break
             except (asyncio.CancelledError, RuntimeError):
-                # Ignore errors during cleanup when breaking out of async generator
+                # Ignore errors during cleanup
                 pass
             finally:
                 # Restore original exception handler
@@ -462,6 +489,7 @@ class ClaudeCodeAgent(BaseAgent):
                 confidence=1.0 if selected else 0.0,
                 reasoning=reasoning,
                 raw_response=raw_response,
+                cost_usd=cost_usd,
             )
 
         except Exception as e:
@@ -514,6 +542,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
         timeout_seconds: int = 60,
         working_dir: str | Path | None = None,
         api_key: str | None = None,
+        oauth_token: str | None = None,
     ):
         """Initialize the Claude Code agent with client support.
 
@@ -523,6 +552,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
             timeout_seconds: Request timeout.
             working_dir: Working directory for Claude.
             api_key: Anthropic API key.
+            oauth_token: Claude Code OAuth token (alternative to API key).
         """
         super().__init__(
             model=model,
@@ -530,6 +560,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
             timeout_seconds=timeout_seconds,
             working_dir=working_dir,
             api_key=api_key,
+            oauth_token=oauth_token,
         )
         self._client: ClaudeSDKClient | None = None
 
@@ -556,8 +587,11 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
         Returns:
             SkillSelection with the chosen skill.
         """
-        if not self._api_key:
-            raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY")
+        if not self._api_key and not self._oauth_token:
+            raise APIKeyError(
+                "Anthropic",
+                "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN",
+            )
 
         if not available_skills:
             return SkillSelection(
@@ -598,10 +632,22 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                 if invoked_skill in skill_name_map:
                     selection_state["selected_skill"] = skill_name_map[invoked_skill]
                     selection_state["tool_input"] = tool_input
-                    return {"decision": "block", "reason": f"Selection: {skill_name_map[invoked_skill]}"}
+                    return {
+                        "decision": "block",
+                        "reason": f"Selection: {skill_name_map[invoked_skill]}",
+                        "continue": False,
+                        "stopReason": f"Skill selection captured: {skill_name_map[invoked_skill]}",
+                    }
             return {}
 
         try:
+            # Build env overrides for authentication
+            env: dict[str, str] = {}
+            if self._oauth_token:
+                env["CLAUDE_CODE_OAUTH_TOKEN"] = self._oauth_token
+                if not self._api_key:
+                    env["ANTHROPIC_API_KEY"] = ""
+
             # Configure with vanilla settings - no custom system prompt
             options = ClaudeAgentOptions(
                 max_turns=self.max_turns,
@@ -609,6 +655,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                 model=self.model,
                 permission_mode="acceptEdits",
                 setting_sources=["project"],  # Only load project skills (isolation!)
+                **({"env": env} if env else {}),
                 hooks={
                     "PreToolUse": [
                         HookMatcher(
@@ -620,12 +667,18 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
             )
 
             raw_response: list[Any] = []
+            cost_usd = 0.0
 
             async with ClaudeSDKClient(options=options) as client:
                 await client.query(prompt)
 
                 async for message in client.receive_response():
                     raw_response.append(message)
+
+                    # Capture cost from ResultMessage if it arrives
+                    if isinstance(message, ResultMessage):
+                        cost_usd = message.total_cost_usd or 0.0
+                        break
 
                     # Check for Skill tool calls in response
                     if isinstance(message, AssistantMessage):
@@ -638,6 +691,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                                         selection_state["selected_skill"] = skill_name_map[invoked_skill]
                                         selection_state["tool_input"] = tool_input
 
+                    # Break as soon as we have a selection
                     if selection_state["selected_skill"]:
                         break
 
@@ -650,6 +704,7 @@ class ClaudeCodeAgentWithClient(ClaudeCodeAgent):
                 confidence=1.0 if selected else 0.0,
                 reasoning=f"Selected: {selection_state['selected_skill']}" if selected else "No selection",
                 raw_response=raw_response,
+                cost_usd=cost_usd,
             )
 
         except Exception as e:

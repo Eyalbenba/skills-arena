@@ -170,8 +170,12 @@ for s in scenarios:
 ## Environment Variables
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...  # Required for claude-code
+ANTHROPIC_API_KEY=sk-ant-...           # API key (for generator + agent runner)
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-... # OAuth token from Claude Code subscription (agent runner only)
 ```
+
+The agent runner (Claude Code) accepts either `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
+The scenario generator (LLMGenerator) always requires `ANTHROPIC_API_KEY` since it uses the Anthropic API directly.
 
 ## Dependencies
 

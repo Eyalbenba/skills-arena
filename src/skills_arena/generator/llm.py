@@ -16,6 +16,7 @@ import anthropic
 from ..config import Config
 from ..exceptions import GeneratorError
 from ..models import Difficulty, Scenario, Skill, Task
+from ..pricing import estimate_cost, extract_response_text, strip_code_fences
 from .base import BaseGenerator
 
 # Prompt template for scenario generation (multi-skill balanced)
@@ -151,6 +152,7 @@ class LLMGenerator(BaseGenerator):
         """
         self.model = model
         self.temperature = temperature
+        self.last_cost_usd: float = 0.0
 
         # Get API key from config or parameter
         if api_key:
@@ -232,26 +234,15 @@ class LLMGenerator(BaseGenerator):
         except anthropic.APIError as e:
             raise GeneratorError(f"Anthropic API error: {e}") from e
 
-        # Extract text
-        response_text = ""
-        for block in response.content:
-            if block.type == "text":
-                response_text += block.text
+        # Track cost from token usage
+        self.last_cost_usd = estimate_cost(
+            self.model, response.usage.input_tokens, response.usage.output_tokens
+        )
 
-        # Parse JSON
-        text = response_text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            start_idx = 1 if lines[0].strip().startswith("```") else 0
-            end_idx = len(lines)
-            for i in range(start_idx, len(lines)):
-                if lines[i].strip() == "```":
-                    end_idx = i
-                    break
-            text = "\n".join(lines[start_idx:end_idx])
-
+        # Parse JSON from response
+        response_text = extract_response_text(response.content)
         try:
-            scenario_dicts = json.loads(text)
+            scenario_dicts = json.loads(strip_code_fences(response_text))
         except json.JSONDecodeError as e:
             raise GeneratorError(f"Failed to parse JSON: {e}") from e
 
@@ -327,24 +318,8 @@ class LLMGenerator(BaseGenerator):
             GeneratorError: If parsing fails.
         """
         # Extract JSON from response (handle markdown code blocks)
-        text = response_text.strip()
-        if text.startswith("```"):
-            # Remove markdown code block
-            lines = text.split("\n")
-            # Find start and end of JSON
-            start_idx = 0
-            end_idx = len(lines)
-            for i, line in enumerate(lines):
-                if line.strip().startswith("```"):
-                    if start_idx == 0 and i == 0:
-                        start_idx = 1
-                    elif i > start_idx:
-                        end_idx = i
-                        break
-            text = "\n".join(lines[start_idx:end_idx])
-
         try:
-            scenarios = json.loads(text)
+            scenarios = json.loads(strip_code_fences(response_text))
         except json.JSONDecodeError as e:
             raise GeneratorError(
                 f"Failed to parse LLM response as JSON: {e}",
@@ -392,7 +367,7 @@ class LLMGenerator(BaseGenerator):
                 return valid
         return None
 
-    def _dict_to_scenario(self, data: dict[str, Any], index: int) -> Scenario:
+    def _dict_to_scenario(self, data: dict[str, Any]) -> Scenario:
         """Convert a dictionary to a Scenario object."""
         # Parse difficulty
         difficulty_str = data.get("difficulty", "medium").lower()
@@ -470,11 +445,13 @@ class LLMGenerator(BaseGenerator):
                 task=task.description,
             ) from e
 
+        # Track cost from token usage
+        self.last_cost_usd = estimate_cost(
+            self.model, response.usage.input_tokens, response.usage.output_tokens
+        )
+
         # Extract text from response
-        response_text = ""
-        for block in response.content:
-            if block.type == "text":
-                response_text += block.text
+        response_text = extract_response_text(response.content)
 
         if not response_text:
             raise GeneratorError(
@@ -494,10 +471,7 @@ class LLMGenerator(BaseGenerator):
             ) from e
 
         # Convert to Scenario objects
-        scenarios = [
-            self._dict_to_scenario(data, i)
-            for i, data in enumerate(scenario_dicts)
-        ]
+        scenarios = [self._dict_to_scenario(data) for data in scenario_dicts]
 
         # Shuffle to avoid ordering bias
         random.shuffle(scenarios)

@@ -78,6 +78,9 @@ class Config(BaseModel):
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
 
+    # OAuth token for Claude Code subscription (alternative to API key for agent runner)
+    claude_oauth_token: str | None = None
+
     # Codex bridge settings (if using codex agent)
     codex_bridge_path: str | None = None
     node_executable: str = "node"
@@ -100,6 +103,15 @@ class Config(BaseModel):
             self.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
         if self.openai_api_key is None:
             self.openai_api_key = os.environ.get("OPENAI_API_KEY")
+        if self.claude_oauth_token is None:
+            self.claude_oauth_token = os.environ.get(
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                os.environ.get("CLAUDE_AGENT_OAUTH_TOKEN"),
+            )
+
+    def has_claude_auth(self) -> bool:
+        """Check if any Claude authentication is available (API key or OAuth token)."""
+        return bool(self.anthropic_api_key or self.claude_oauth_token)
 
     def get_anthropic_api_key(self) -> str:
         """Get Anthropic API key, raising if not available."""

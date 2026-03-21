@@ -12,6 +12,7 @@ import anthropic
 
 from ..exceptions import OptimizerError
 from ..models import ComparisonResult, Parameter, Skill
+from ..pricing import estimate_cost, extract_response_text, strip_code_fences
 
 OPTIMIZATION_PROMPT = '''You are an expert at writing AI agent skill descriptions that maximize selection rates.
 
@@ -171,7 +172,7 @@ class SkillOptimizer:
         skill: Skill,
         comparison_result: ComparisonResult,
         competitors: list[Skill],
-    ) -> tuple[Skill, str]:
+    ) -> tuple[Skill, str, float]:
         """Optimize a skill description based on competition data.
 
         Args:
@@ -180,7 +181,7 @@ class SkillOptimizer:
             competitors: The competitor skills.
 
         Returns:
-            Tuple of (optimized Skill, reasoning string).
+            Tuple of (optimized Skill, reasoning string, cost in USD).
 
         Raises:
             OptimizerError: If optimization fails.
@@ -225,31 +226,21 @@ class SkillOptimizer:
                 f"Anthropic API error: {e}", skill_name=skill_name
             ) from e
 
-        # Extract response text
-        response_text = ""
-        for block in response.content:
-            if block.type == "text":
-                response_text += block.text
+        # Track cost from token usage
+        cost_usd = estimate_cost(
+            self.model, response.usage.input_tokens, response.usage.output_tokens
+        )
+
+        # Extract and parse response
+        response_text = extract_response_text(response.content)
 
         if not response_text:
             raise OptimizerError(
                 "Empty response from LLM", skill_name=skill_name
             )
 
-        # Parse JSON (strip markdown code blocks if present)
-        text = response_text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            start_idx = 1 if lines[0].strip().startswith("```") else 0
-            end_idx = len(lines)
-            for i in range(start_idx, len(lines)):
-                if i > 0 and lines[i].strip() == "```":
-                    end_idx = i
-                    break
-            text = "\n".join(lines[start_idx:end_idx])
-
         try:
-            data = json.loads(text)
+            data = json.loads(strip_code_fences(response_text))
         except json.JSONDecodeError as e:
             raise OptimizerError(
                 f"Failed to parse optimizer response as JSON: {e}",
@@ -287,4 +278,4 @@ class SkillOptimizer:
         )
 
         reasoning = data.get("reasoning", "")
-        return optimized, reasoning
+        return optimized, reasoning, cost_usd
