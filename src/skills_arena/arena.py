@@ -142,9 +142,12 @@ class Arena:
             APIKeyError: If a required API key is missing.
         """
         if "claude-code" in self.config.agents:
-            key = self.config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
-            if not key:
-                raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY")
+            has_api_key = self.config.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+            has_oauth = self.config.claude_oauth_token or os.environ.get(
+                "CLAUDE_CODE_OAUTH_TOKEN", os.environ.get("CLAUDE_AGENT_OAUTH_TOKEN")
+            )
+            if not has_api_key and not has_oauth:
+                raise APIKeyError("Anthropic", "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
 
     def _get_generator(self) -> BaseGenerator:
         """Get or create the scenario generator."""
@@ -163,7 +166,10 @@ class Arena:
     def _get_agent(self, name: str) -> BaseAgent:
         """Get or create an agent by name."""
         if name not in self._agents:
-            self._agents[name] = get_agent(name)
+            kwargs: dict = {}
+            if name == "claude-code" and self.config.claude_oauth_token:
+                kwargs["oauth_token"] = self.config.claude_oauth_token
+            self._agents[name] = get_agent(name, **kwargs)
         return self._agents[name]
 
     async def _cleanup_agents(self) -> None:
